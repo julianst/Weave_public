@@ -5,6 +5,9 @@ import { ago, api, bridge, navigate } from './lib.ts';
 import { Markdown, Modal, toast } from './ui.tsx';
 import { t, T, useTexts } from './texts.tsx';
 
+/** Where a Microsoft Store build gets its updates: the Store's own page for them (main.ts lets only this one through). */
+const STORE_UPDATES = 'ms-windows-store://downloadsandupdates';
+
 /** How the window says why a build doesn't update itself. */
 const whyNot = (why: WhyNot) => t(`update.why.${why}`);
 
@@ -78,6 +81,8 @@ function DesktopUpdate() {
   if (!view || !view.version || hidden === view.version) return null;
   // Put off before this start: a ready update shows again next start, an available one too (as before).
   if (!view.asked && putOff(view.version) && view.state !== 'downloading') return null;
+  // The Microsoft Store updates a Store build by itself, once a release is in the Store (often later than here): only say so when asked.
+  if (!view.asked && view.why === 'store') return null;
   const later = () => {
     store.set(LATER, String(Date.now() + DAY));
     setHidden(view.version);
@@ -129,7 +134,7 @@ function DesktopUpdate() {
 
   if (view.state === 'available' && view.latest)
     return (
-      <Prompt current={view.current} latest={view.latest} why={view.why ? whyNot(view.why) : undefined} install={view.self ? () => act('download') : undefined} onLater={later} onSkip={skip} />
+      <Prompt current={view.current} latest={view.latest} why={view.why ? whyNot(view.why) : undefined} store={view.why === 'store'} install={view.self ? () => act('download') : undefined} onLater={later} onSkip={skip} />
     );
   return null;
 }
@@ -175,10 +180,11 @@ function CheckOnly() {
 }
 
 /** A newer version this build doesn't install by itself (why), or only when asked (install): the notes and the download. */
-function Prompt({ current, latest, why, install, onLater, onSkip }: { current: string; latest: NonNullable<UpdateInfo['latest']>; why?: string; install?: () => void; onLater(): void; onSkip(): void }) {
+function Prompt({ current, latest, why, store, install, onLater, onSkip }: { current: string; latest: NonNullable<UpdateInfo['latest']>; why?: string; store?: boolean; install?: () => void; onLater(): void; onSkip(): void }) {
   const { t } = useTexts();
   const download = () => {
-    if (latest.url && /^https:\/\//.test(latest.url)) window.open(latest.url, '_blank', 'noopener');
+    if (store) window.open(STORE_UPDATES, '_blank');
+    else if (latest.url && /^https:\/\//.test(latest.url)) window.open(latest.url, '_blank', 'noopener');
     else if (latest.post) navigate(`#/post/${latest.post.replace('weave:post:', '')}`);
     onLater();
   };
@@ -210,7 +216,7 @@ function Prompt({ current, latest, why, install, onLater, onSkip }: { current: s
             </button>
           ) : (
             <button type="button" className="default" onClick={download}>
-              {t(latest.url ? 'update.download' : 'update.open.release')}
+              {t(store ? 'update.open.store' : latest.url ? 'update.download' : 'update.open.release')}
             </button>
           )}
         </div>
