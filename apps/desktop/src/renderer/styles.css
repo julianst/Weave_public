@@ -562,6 +562,20 @@ menu[role='tablist'] { margin-bottom: 0; }
 .color input { width: 32px; height: 20px; padding: 0; }
 .space-preview { margin-top: 8px; padding: 12px; background: var(--bg); }
 .notify-row { margin: 8px 0; flex-wrap: nowrap; }
+/* The notification settings: each kind a row (its name, then what it covers), nothing wider than the dialog. */
+.notify-settings fieldset { min-width: 0; }
+.notify-choice { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
+.notify-choice input { margin-top: 3px; flex: none; }
+.notify-choice label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.notify-choice label > span:first-child { font-weight: 600; }
+.notify-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.notify-state .pill { padding: 1px 8px; border-radius: 10px; font-size: 11px; background: var(--muted-bg, rgba(127,127,127,.2)); }
+.notify-state .pill.on { background: #2e7d32; color: #fff; }
+.notify-more { margin: 10px 0; }
+.notify-more > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.notify-settings .marks-row { flex-wrap: wrap; }
+.notify-settings .marks-row > div { min-width: 0; flex: 1 1 200px; }
+.notify-settings .notice-rule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .welcome { width: min(420px, calc(100vw - 32px)); }
 .welcome-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-family: var(--content-font); font-size: 12px; }
 .first-ways { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }

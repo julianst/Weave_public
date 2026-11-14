@@ -402,10 +402,9 @@ function NoticeRules() {
     void saveRules(next).catch(() => setRules(loadRules()));
   };
   return (
-    <>
-      <p>
-        {t('rules.title')} <span className="small muted">{t('rules.hint')}</span>
-      </p>
+    <fieldset>
+      <legend>{t('rules.title')}</legend>
+      <p className="small muted">{t('rules.hint')}</p>
       {rules.map((rule, i) => (
         <RuleRow
           key={i}
@@ -416,13 +415,13 @@ function NoticeRules() {
           onRemove={() => change(rules.filter((_, j) => j !== i))}
         />
       ))}
-      <div className="field-row">
-        <span className="small grow">{t('rules.default')}</span>
+      {!rules.length && <p className="small">{t('rules.default')}</p>}
+      <div className="buttons">
         <button type="button" onClick={() => change([...rules, { count: true, notify: true }])}>
           {t('rules.add')}
         </button>
       </div>
-    </>
+    </fieldset>
   );
 }
 
@@ -474,8 +473,8 @@ function HintServices() {
     await attempt(() => api('addHints', { project: s.project!.id, app: s.service, tag: s.newer, approve: true }), t('service.yours.now', { name: s.name, tag: s.newer })).then(mine.reload);
   };
   return (
-    <fieldset>
-      <legend>{t('hints.legend')}</legend>
+    <details className="notify-more">
+      <summary>{t('hints.legend')}</summary>
       <p className="small muted">{t('hints.about')}</p>
       {mine.error && <p className="error">{mine.error}</p>}
       {(mine.data ?? []).map((s) => (
@@ -513,7 +512,7 @@ function HintServices() {
           {t('button.add')}
         </AsyncButton>
       </div>
-    </fieldset>
+    </details>
   );
 }
 
@@ -527,8 +526,10 @@ function WebPushBox() {
   return (
     <fieldset>
       <legend>{t('push.legend')}</legend>
-      <p className="small">{state ? t(`push.state.${state}`) : '…'}</p>
-      <p className="small muted">{t('push.why')}</p>
+      <p className="notify-state">
+        {state && <span className={`pill ${state === 'on' ? 'on' : ''}`}>{t(state === 'on' ? 'push.pill.on' : 'push.pill.off')}</span>}
+        <span className="small">{state ? t(`push.state.${state}`) : '…'}</span>
+      </p>
       <div className="buttons">
         {state === 'off' && (
           <AsyncButton className="push-on" onClick={() => attempt(() => bridge.web!.push.enable().then(reload), t('push.on.done'))}>
@@ -544,6 +545,7 @@ function WebPushBox() {
           </>
         )}
       </div>
+      <p className="small muted">{t('push.why')}</p>
     </fieldset>
   );
 }
@@ -580,24 +582,29 @@ export function NotificationSettings({ onClose }: { onClose(): void }) {
   };
   return (
     <Modal title={t('notify.title')} onClose={onClose}>
+      <div className="notify-settings">
       {bridge.web && <WebPushBox />}
-      <p>{t('notify.show.for')}</p>
-      {NOTICE_CATEGORIES.map((category) => (
-        <div className="field-row notify-row" key={category}>
-          <input type="checkbox" id={`notify-${category}`} checked={settings[category]} onChange={() => toggle(category)} />
-          <label htmlFor={`notify-${category}`}>
-            {t(`notice.cat.${category}`)}
-            <span className="small muted"> · {t(`notice.cat.${category}.hint`)}</span>
-          </label>
-        </div>
-      ))}
+      <fieldset>
+        <legend>{t('notify.show.for')}</legend>
+        {NOTICE_CATEGORIES.map((category) => (
+          <div className="notify-choice" key={category}>
+            <input type="checkbox" id={`notify-${category}`} checked={settings[category]} onChange={() => toggle(category)} />
+            <label htmlFor={`notify-${category}`}>
+              <span>{t(`notice.cat.${category}`)}</span>
+              <span className="small muted">{t(`notice.cat.${category}.hint`)}</span>
+            </label>
+          </div>
+        ))}
+        {/* Weave Web says how the browser stands in the push box above; a computer says it here. */}
+        {!bridge.web && allowed === 'denied' && <p className="small">{t('notify.blocked')}</p>}
+        {!bridge.web && allowed === 'unsupported' && <p className="small">{t('notify.unsupported')}</p>}
+      </fieldset>
       <NoticeRules />
       <HintServices />
-      <p className="small">{t('notify.nothing.looking')}</p>
-      {allowed === 'denied' && <p className="small">{t('notify.blocked')}</p>}
-      {allowed === 'unsupported' && <p className="small">{t('notify.unsupported')}</p>}
+      <p className="small muted">{t(bridge.web ? 'notify.nothing.looking.web' : 'notify.nothing.looking')}</p>
+      </div>
       <div className="buttons">
-        {allowed === 'granted' && (
+        {!bridge.web && allowed === 'granted' && (
           <button type="button" onClick={() => show(t('notify.test.title'), t('notify.test.text'), {})}>
             {t('notify.test')}
           </button>
