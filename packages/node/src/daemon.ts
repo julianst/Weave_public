@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { startApi } from './api.ts';
+import { startAgentApi, startApi } from './api.ts';
 import { startLinks, type LinkServer } from './links.ts';
 import { connectDaemon, type DaemonInfo } from './client.ts';
 import { resolveHome, writeJson } from './home.ts';
@@ -10,17 +10,20 @@ import { keepReconciling } from './reconciling.ts';
 export interface Daemon {
   node: WeaveNode;
   port: number;
+  /** Where the agent API listens, when it's on. */
+  agentApi?: { host: string; port: number };
   stop(): Promise<void>;
 }
 
 /**
  * Open the node in `dir`, go online and serve the local API. One daemon per home. `onStopRequest` runs when a
  * client asks it to stop (POST /v1/stop); `version`, `build` and `startedBy` go into daemon.json for clients.
- * `linkPort`: where post addresses are served (default 7710, or WEAVE_LINK_PORT).
+ * `linkPort`: where post addresses are served (default 7710, or WEAVE_LINK_PORT). `agentApi`: host:port of the agent API
+ * (agent tokens only; off unless given here, in the config's agentApi.listen, or in WEAVE_AGENT_API_LISTEN).
  */
 export async function startDaemon(
   dir?: string,
-  options: { port?: number; linkPort?: number; onStopRequest?: () => void } & Pick<DaemonInfo, 'version' | 'build' | 'startedBy'> = {},
+  options: { port?: number; linkPort?: number; agentApi?: string; onStopRequest?: () => void } & Pick<DaemonInfo, 'version' | 'build' | 'startedBy'> = {},
 ): Promise<Daemon> {
   const home = resolveHome(dir);
   if (await connectDaemon(home)) throw new Error(`a daemon is already running for ${home.dir}`);
@@ -40,6 +43,16 @@ export async function startDaemon(
     ...(options.startedBy ? { startedBy: options.startedBy } : {}),
   };
   writeJson(home.daemon, info);
+  // The agent API, for harnesses elsewhere on a cluster's network: agent tokens only.
+  const agentListen = options.agentApi ?? node.config.agentApi?.listen ?? process.env.WEAVE_AGENT_API_LISTEN;
+  const agentApi = agentListen
+    ? await startAgentApi(node, agentListen, (token) => node.agentGate(token)).catch(async (error: Error) => {
+        rmSync(home.daemon, { force: true });
+        await api.close();
+        await node.close();
+        throw new Error(`the agent API can't listen at ${agentListen}: ${error.message}`);
+      })
+    : undefined;
   // Post addresses (http://weave.localhost:7710/…). One Weave per computer gets the port; the others go without.
   const linkPort = options.linkPort ?? (process.env.WEAVE_LINK_PORT ? Number(process.env.WEAVE_LINK_PORT) : undefined);
   const links = await startLinks(node, linkPort).catch((error: Error & { code?: string }): LinkServer | undefined => {
@@ -73,6 +86,7 @@ export async function startDaemon(
   return {
     node,
     port: api.port,
+    ...(agentApi ? { agentApi: { host: agentApi.host, port: agentApi.port } } : {}),
     async stop() {
       if (stopped) return;
       stopped = true;
@@ -81,6 +95,7 @@ export async function startDaemon(
       clearInterval(routines);
       rmSync(home.daemon, { force: true });
       await api.close();
+      await agentApi?.close();
       await links?.close();
       // Going online may never finish (no network, a bootstrap that doesn't answer): closing the node ends it anyway.
       await Promise.race([online, new Promise((resolve) => setTimeout(resolve, 2000).unref())]);

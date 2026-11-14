@@ -6,6 +6,8 @@
 //   weave-server operator    a one-time link into the admin console
 //   weave-server status      what it runs, and where
 //   weave-server mcp --as <agent>     an agent handed to this always-on node, over MCP (stdio)
+//   weave-server mcp --api <url> --token <t>   the same from another pod, through the node's agent API (no home)
+//   weave-server agent-token <agent> [--revoke]  a token for the agent API (weave-server run --agent-api <host:port>)
 //   weave-server watch               what arrives on this node (JSON lines)
 //
 // Its home is WEAVE_HOME (/data in the container). The key service's secret
@@ -19,7 +21,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { connectDaemon, followDaemon, loadConfig, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
+import { connectDaemon, followDaemon, loadConfig, remoteAgent, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
 
 declare const WEAVE_VERSION: string | undefined;
 const VERSION = typeof WEAVE_VERSION === 'string' ? WEAVE_VERSION : 'dev';
@@ -53,6 +55,10 @@ const { values, positionals } = parseArgs({
     standby: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
     as: { type: 'string' },
+    api: { type: 'string' },
+    token: { type: 'string' },
+    revoke: { type: 'boolean', default: false },
+    'agent-api': { type: 'string' },
   },
 });
 const command = positionals[0] ?? 'run';
@@ -71,6 +77,9 @@ const HELP = `weave-server ${VERSION}: a company's own Weave node
   weave-server pair [name]                  a request: paste it on one of your computers (weave node add, or Keys & devices)
   weave-server join <answer | file | ->     finish with the answer from your computer (or a file holding it, or - to read it), then: weave-server run
   weave-server mcp --as <agent>             an agent handed to this node (weave agent add <agent> --node <node>), over MCP (stdio)
+  weave-server agent-token <agent> [--revoke]   a token that acts as that agent only, for the agent API
+  weave-server run --agent-api 0.0.0.0:7712     also serve the agent API (agent tokens only; or WEAVE_AGENT_API_LISTEN)
+  weave-server mcp --api <url> --token <token>  in another pod: MCP through a node's agent API (or WEAVE_AGENT_API, WEAVE_AGENT_TOKEN)
   weave-server watch                        what arrives on this node, as JSON lines
 
   weave-server backup <folder>              a consistent copy of this server's home, while it runs
@@ -221,7 +230,7 @@ async function run(): Promise<void> {
   // A stop asked for while it's still starting (its API is up first) is kept, and done once it can be.
   let stopAsked = false;
   let stopping = async () => void (stopAsked = true);
-  const daemon = await startDaemon(home.dir, { version: VERSION, build: VERSION === 'dev' ? 'dev' : 'release', startedBy: 'cli', onStopRequest: () => void stopping() });
+  const daemon = await startDaemon(home.dir, { version: VERSION, build: VERSION === 'dev' ? 'dev' : 'release', startedBy: 'cli', onStopRequest: () => void stopping(), ...(values['agent-api'] ? { agentApi: values['agent-api'] } : {}) });
   const company = await daemon.node.company();
   // Someone's always-on node (weave-server pair / join) has no company, and needs none.
   const grant = daemon.node.replica.authority.grant(daemon.node.identity.did);
@@ -234,6 +243,7 @@ async function run(): Promise<void> {
   console.log(`  home ${home.dir}`);
   if (consoleInfo.on) console.log(`  admin console ${consoleInfo.url} (health: /healthz)`);
   if (scim.on) console.log(`  SCIM port ${scim.port}, /scim/v2`);
+  if (daemon.agentApi) console.log(`  agent API ${daemon.agentApi.host}:${daemon.agentApi.port} (agent tokens only: keep it on the cluster's network)`);
   const stop = async () => {
     await daemon.stop();
     process.exit(0);
@@ -290,10 +300,25 @@ async function main(): Promise<void> {
     case 'operator':
       return void console.log(await (await client()).consoleOperatorLink());
     case 'mcp': {
+      // From another pod: through a node's agent API, as its token's agent; no home here.
+      const api = values.api ?? process.env.WEAVE_AGENT_API;
+      const token = values.token ?? process.env.WEAVE_AGENT_TOKEN;
+      if (api || token) {
+        if (!api || !token) throw new Error('the agent API takes both: --api <url> and --token <agent token> (or WEAVE_AGENT_API and WEAVE_AGENT_TOKEN)');
+        const remote = remoteAgent(api, token);
+        const { serveStdio } = await import('@weave/mcp');
+        return serveStdio(remote, { as: (await remote.whoami()).agents[0]?.name });
+      }
       // An agent handed to this always-on node: a harness here talks to the running node as that agent.
       if (!values.as) throw new Error('usage: weave-server mcp --as <agent> (an agent added for this node: weave agent add <agent> --node <node>)');
       const { serveStdio } = await import('@weave/mcp');
       return serveStdio(followDaemon(home), { as: values.as });
+    }
+    case 'agent-token': {
+      const name = positionals[1];
+      if (!name) throw new Error('usage: weave-server agent-token <agent> [--revoke]');
+      const answer = await (await client()).agentToken({ name, ...(values.revoke ? { revoke: true } : {}) });
+      return void console.log(answer.token ?? `revoked ${answer.revoked} token${answer.revoked === 1 ? '' : 's'} of ${answer.agent}`);
     }
     case 'watch': {
       const c = await client();

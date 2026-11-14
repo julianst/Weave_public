@@ -131,7 +131,8 @@ import {
 import { loadConfig, saveConfig, type Config } from './config.ts';
 import { FileStore } from './filestore.ts';
 import { openStore, type SqliteStore } from './sqlitestore.ts';
-import { resolveHome, type Home } from './home.ts';
+import { readJson, resolveHome, writeJson, type Home } from './home.ts';
+import type { AgentGrant } from './agentapi.ts';
 import { moveHomeKey, readSecretJson, writeSecretJson } from './vault.ts';
 import { type Fetch } from './github.ts';
 import { createHash } from 'node:crypto';
@@ -2054,6 +2055,35 @@ export class WeaveNode implements Backend {
 
   votingDelegate(...args: Parameters<Content['votingDelegate']>): ReturnType<Content['votingDelegate']> {
     return this.#content.votingDelegate(...args);
+  }
+
+  /**
+   * A token for one of the agents this node holds (agentapi.ts): it acts as that agent through the agent API, and as
+   * nothing else. Only its hash is kept here. `revoke`: every token of that agent stops working.
+   */
+  async agentToken(input: { name: string; revoke?: boolean }): Promise<{ agent: string; token?: string; revoked?: number }> {
+    const file = joinPath(this.home.dir, 'agent-tokens.json');
+    const kept = readJson<AgentTokenRecord[]>(file) ?? [];
+    if (input.revoke) {
+      const left = kept.filter((t) => t.agent !== input.name);
+      writeJson(file, left);
+      return { agent: input.name, revoked: kept.length - left.length };
+    }
+    const agent = this.#agents.find((a) => a.name === input.name);
+    if (!agent) throw noAgentError(input.name, this.#agents.map((a) => a.name));
+    const token = `wat_${b64u.encode(new Uint8Array(randomBytes(32)))}`;
+    writeJson(file, [...kept, { hash: createHash('sha256').update(token).digest('hex'), agent: agent.name, did: agent.did, created: new Date(this.clock()).toISOString() }]);
+    return { agent: agent.name, token };
+  }
+
+  /** Who an agent token speaks for, while that agent's key is still here and not revoked. */
+  agentGate(token: string): AgentGrant | undefined {
+    if (!token.startsWith('wat_')) return undefined;
+    const hash = createHash('sha256').update(token).digest('hex');
+    const found = (readJson<AgentTokenRecord[]>(joinPath(this.home.dir, 'agent-tokens.json')) ?? []).find((t) => t.hash === hash);
+    const agent = found && this.#agents.find((a) => a.name === found.agent && a.did === found.did);
+    if (!agent || this.replica.authority.grant(agent.did)?.revokedAfter !== undefined) return undefined;
+    return { name: agent.name, did: agent.did, directChats: this.#isLinkedNode ? this.#nodeAgents.readsDirectChats(agent.name) : false };
   }
 
   async addNodeAgent(input: { name: string; permissions: string[]; node: string; directChats?: boolean }): Promise<AgentInfo> {
@@ -4116,6 +4146,14 @@ export class WeaveNode implements Backend {
     if (announce !== false) await this.#kernel.announce(site.project.id, { kind: 'website', id: site.id }, `opened ${site.name}: come and join`);
     return site;
   }
+}
+
+/** An agent token as a node keeps it: never the token, only its hash. */
+interface AgentTokenRecord {
+  hash: string;
+  agent: string;
+  did: Did;
+  created: string;
 }
 
 export const agentInfo = (agent: AgentKey): AgentInfo => ({ name: agent.name, did: agent.did, permissions: agent.permissions });

@@ -2324,6 +2324,11 @@ export interface Backend {
    * direct chats there too (the node then takes them). Revoke it like any agent; the node drops its key.
    */
   addNodeAgent(input: { name: string; permissions: string[]; node: string; directChats?: boolean }): Promise<AgentInfo>;
+  /**
+   * A token for one of the agents this node holds, for a harness that reaches this node through its agent API (weave
+   * daemon --agent-api): it acts as that agent only. `revoke`: all of that agent's tokens stop working.
+   */
+  agentToken(input: { name: string; revoke?: boolean }): Promise<{ agent: string; token?: string; revoked?: number }>;
   /** Change what one of your agents may sign (e.g. add weave.post.coauthor to let it confirm co-authorships); for one on an always-on node, also whether it reads your direct chats. */
   updateAgent(input: { name: string; permissions: string[]; directChats?: boolean }): Promise<AgentInfo>;
   /** An agent asks its person to let it sign more kinds; the request waits in their Inbox (or is already answered). */
@@ -2728,7 +2733,7 @@ export type RpcMethod = Exclude<keyof Backend, 'watch'>;
 export { LENS_CSP } from './lenscsp.ts';
 
 export const RPC_METHODS: readonly RpcMethod[] = [
-  'whoami', 'publish', 'feed', 'addAgent', 'addNodeAgent', 'updateAgent', 'join', 'status',
+  'whoami', 'publish', 'feed', 'addAgent', 'addNodeAgent', 'agentToken', 'updateAgent', 'join', 'status',
   'spaces', 'createGroup', 'createProject', 'invite', 'joinSpace', 'lookAtInvite', 'createOnboardLink', 'onboardLinks', 'revokeOnboardLink', 'lookAtOnboardLink', 'followOnboardLink', 'playLinks', 'removePlayLink', 'pairPhone', 'phones', 'unpairPhone', 'setHomeVisibility', 'followBoard', 'leave', 'handOver', 'closeSpace', 'setHistory', 'setBoardRule', 'keepPost', 'fading', 'shred', 'fetchOlder', 'keepers', 'letCopiesGo', 'dropKept', 'manageSpace', 'unlockSpace', 'destroyCompanyKey', 'signIn', 'setHold', 'approveAgent', 'setVisitors', 'agentBlocked', 'escrowRecovery', 'openEscrow', 'createCompany', 'company', 'companyAction', 'enrollLink', 'inviteByEmail', 'link', 'links', 'setScim', 'scim', 'setConsole', 'consoleInfo', 'companySignIn', 'signInStatus', 'consoleOperatorLink', 'backup', 'saveBackup', 'keystores', 'moveHomeKey', 'linkNode', 'linkBrowser', 'addAuditStream', 'removeAuditStream', 'auditStreams', 'exportSpace', 'audit', 'knocks', 'answerKnock', 'setBoardAccess', 'members', 'removeMember',
   'addService', 'artifacts', 'catalog', 'catalogArtifact', 'listInCatalog', 'unlistFromCatalog', 'openWebsite', 'services', 'setService', 'removeService', 'serviceProfiles', 'servicesIn', 'shippedServices', 'serviceActions', 'servicePanels', 'serviceLists', 'setServicePolicy', 'setArtifactAccess', 'withdrawArtifact', 'launchWebsite', 'programConsents', 'withdrawProgramConsent', 'releaseFile', 'getArtifactFile', 'artifactFileJob', 'fetchers', 'addFetcher', 'setFetcher', 'removeFetcher', 'keyvaults', 'addKeyvault', 'removeKeyvault', 'addClientApp', 'removeClientApp', 'setupPacks', 'startKeyvaultApp', 'keyvaultOwners', 'finishKeyvaultApp', 'keyvaultReachable', 'removeKeyvaultApp', 'handKeyvault', 'serviceSettings', 'setServiceSetting', 'startServiceSignIn', 'finishServiceSignIn', 'askService', 'serviceRequests', 'platforms', 'accountProof', 'linkAccount', 'startAccountProof', 'finishAccountProof', 'accounts', 'myAccounts',
   'createCommunity', 'community', 'setCommunity', 'setModerator',

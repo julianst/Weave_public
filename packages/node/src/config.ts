@@ -44,11 +44,16 @@ export interface Config {
    * give out) and lets in whoever comes through it. Unset: an always-on node is one, a person's computer isn't.
    */
   frontDoor?: boolean;
+  /**
+   * The agent API: a second listener for agent tokens only (weave agent token), e.g. { listen: "0.0.0.0:7712" } for a
+   * harness in another pod. Off unless set (or given: weave daemon --agent-api, WEAVE_AGENT_API_LISTEN).
+   */
+  agentApi?: { listen: string };
 }
 
 /** What this build reads of the config; anything else in the file is kept as it is (see loadConfig). */
 const KNOWN: ReadonlySet<string> = new Set<keyof Config>([
-  'topics', 'bootstrap', 'pendingMemberships', 'agentsOffered', 'attestor', 'archive', 'updates', 'scim', 'standby', 'generation', 'console', 'followClaudeCode', 'spaceFolders', 'desk', 'language', 'firewall', 'frontDoor',
+  'topics', 'bootstrap', 'pendingMemberships', 'agentsOffered', 'attestor', 'archive', 'updates', 'scim', 'standby', 'generation', 'console', 'followClaudeCode', 'spaceFolders', 'desk', 'language', 'firewall', 'frontDoor', 'agentApi',
 ]);
 
 export function loadConfig(home: Home): Config {

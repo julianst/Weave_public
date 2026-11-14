@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { errorToWire } from '@weave/core';
 import { RPC_METHODS, type Backend, type RpcMethod, type ServiceGate } from './backend.ts';
 import { updateFeed } from './update.ts';
+import { agentCall, agentWatch, type AgentGrant } from './agentapi.ts';
 
 export interface ApiServer {
   port: number;
@@ -167,4 +168,58 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
     chunks.push(chunk as Buffer);
   }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+}
+
+/**
+ * The agent API (opt-in: `weave daemon --agent-api <host:port>`, or the config's agentApi.listen): a second listener,
+ * for a harness elsewhere on a cluster's network, that takes agent tokens only (never the daemon's own token, never a
+ * service's). Each acts as its one agent (agentapi.ts): the same /v1/rpc and /v1/watch, limited to that agent. Any Host
+ * goes here: it's reached by a cluster's service name. Plain HTTP: keep it on the cluster's network, or put TLS in front.
+ */
+export async function startAgentApi(backend: Backend, listen: string, gate: (token: string) => AgentGrant | undefined): Promise<{ host: string; port: number; close(): Promise<void> }> {
+  const at = /^(?:\[([^\]]+)\]|([^:]*)):(\d+)$/.exec(listen.trim());
+  if (!at) throw new Error(`the agent API listens at host:port, e.g. 0.0.0.0:7712 (not ${listen})`);
+  const host = at[1] ?? (at[2] || '0.0.0.0');
+  const server: Server = createServer((req, res) => {
+    handleAgent(backend, gate, req, res).catch((error: Error) => send(res, 400, errorToWire(error)));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(Number(at[3]), host, () => resolve());
+  });
+  return {
+    host,
+    port: (server.address() as AddressInfo).port,
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+async function handleAgent(backend: Backend, gate: (token: string) => AgentGrant | undefined, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const grant = gate(req.headers.authorization?.replace(/^Bearer /, '') ?? '');
+  if (!grant) return send(res, 401, { error: 'unauthorized: the agent API takes agent tokens (weave agent token <name>)' });
+  const url = new URL(req.url ?? '/', 'http://agent-api');
+  const route = `${req.method} ${url.pathname}`;
+  if (route === 'POST /v1/rpc') {
+    const { method, args } = (await readBody(req)) as { method?: string; args?: unknown[] };
+    const params = (Array.isArray(args) ? args : []).map((a) => (a === null ? undefined : a));
+    const answer = agentCall(backend, grant, String(method), params);
+    if (!answer) return send(res, 403, { error: `an agent token can't call ${method}` });
+    return send(res, 200, { result: (await answer) ?? null });
+  }
+  if (route === 'GET /v1/watch') {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    res.write(': connected\n\n');
+    const controller = new AbortController();
+    const heartbeat = setInterval(() => res.write(': ping\n\n'), 30_000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      controller.abort();
+    });
+    return agentWatch(backend, grant, (item) => res.write(`data: ${JSON.stringify(item)}\n\n`), controller.signal);
+  }
+  return send(res, 404, { error: `no route ${route} for an agent token` });
 }

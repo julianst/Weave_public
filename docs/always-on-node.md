@@ -67,12 +67,99 @@ With Docker, run the harness in the container (or in one that shares its volume 
 docker exec -i weave node /app/weave-server.mjs mcp --as claude
 ```
 
-In Kubernetes, the harness runs as another container in the pod and talks to the node over `127.0.0.1`, or from
-outside with:
+### From another pod: the agent API
+
+In a cluster, the recommended setup keeps the harness out of the node's pod. The Weave pod runs the node (it needs
+UDP out to find peers) and serves an **agent API** besides: a second listener that takes agent tokens only. The
+harness's pod (Claude, say) needs no UDP, no home and none of the node's powers: just the MCP command, the API's
+address and a token.
+
+- **An agent token** acts as its one agent and nothing else: every write is signed by that agent, within its rights;
+  it reads what the agent reads (your groups, projects and communities; your direct chats only for an agent with
+  direct chats on); it can't touch keys, devices, services, settings, other agents, links or pairing. Only its hash
+  is kept on the node. It stops working when you revoke it (`--revoke`: all of that agent's tokens) or the agent.
+- **The agent API** takes only agent tokens: the node's own API token (daemon.json) is refused there, and that API
+  stays on `127.0.0.1` as before. It speaks plain HTTP: keep it on the cluster's network (a ClusterIP service and a
+  NetworkPolicy, as below), or put TLS in front of it.
+
+On your computer, add the agent for the node (`weave agent add claude --node cluster --can …`). Then in the Weave pod:
 
 ```bash
-kubectl exec -i deploy/weave -c weave -- node /app/weave-server.mjs mcp --as claude
+kubectl exec deploy/weave -c weave -- node /app/weave-server.mjs agent-token claude
+kubectl create secret generic weave-agent-claude --from-literal=token='wat_…'
 ```
+
+(`weave agent token claude` with the `weave` command line; `… agent-token claude --revoke` revokes.)
+
+The Weave pod serves the agent API (`--agent-api`, or `"agentApi": { "listen": "0.0.0.0:7712" }` in its config, or
+`WEAVE_AGENT_API_LISTEN`), on a ClusterIP service that only the harness's pods reach:
+
+```yaml
+# in the weave Deployment (see "In a Kubernetes cluster" below)
+        - name: weave
+          image: ghcr.io/martl-projects/weave-server:0.17.2
+          args: [run, --agent-api, "0.0.0.0:7712"]
+          ports: [{ name: agent-api, containerPort: 7712 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: weave-agents }
+spec:
+  type: ClusterIP
+  selector: { app: weave }
+  ports: [{ name: agent-api, port: 7712, targetPort: agent-api }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: weave-agent-api }
+spec:
+  podSelector: { matchLabels: { app: weave } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { weave-agent: "yes" } } }]
+      ports: [{ port: 7712 }]
+```
+
+The harness's pod runs MCP through it, with the token from the Secret. The Weave Server image brings the program:
+copy it in from an init container (or install the `weave` command line in your harness's image and run
+`weave mcp --api … --token …`):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: claude }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: claude } }
+  template:
+    metadata: { labels: { app: claude, weave-agent: "yes" } }
+    spec:
+      initContainers:
+        - name: weave
+          image: ghcr.io/martl-projects/weave-server:0.17.2
+          command: [sh, -c, "cp -r /app/. /weave/"]
+          volumeMounts: [{ name: weave, mountPath: /weave }]
+      containers:
+        - name: claude
+          image: your/claude-harness           # with Node 24 on Linux (glibc), like the Weave image
+          env:
+            - { name: WEAVE_AGENT_API, value: "http://weave-agents:7712" }
+            - name: WEAVE_AGENT_TOKEN
+              valueFrom: { secretKeyRef: { name: weave-agent-claude, key: token } }
+          volumeMounts: [{ name: weave, mountPath: /weave }]
+      volumes:
+        - { name: weave, emptyDir: {} }
+```
+
+The harness's MCP entry is then `node /weave/weave-server.mjs mcp` (it reads `WEAVE_AGENT_API` and
+`WEAVE_AGENT_TOKEN`); with the command line, `weave mcp --api http://weave-agents:7712 --token "$WEAVE_AGENT_TOKEN"`,
+and `weave watch --api … --token …` streams what arrives.
+
+**The sidecar alternative:** the harness as a second container in the Weave pod, running
+`node /app/weave-server.mjs mcp --as claude` against the node on `127.0.0.1`. It works without tokens, but that
+container shares the node's network and, with the volume, its home: it can reach the node's full API (everything your
+node may do, not just the agent) and read its keys. Prefer the agent API unless you trust the harness as much as the
+node.
 
 ## Your front door
 
@@ -140,5 +227,6 @@ Pair it once with `kubectl exec -it deploy/weave -c weave -- node /app/weave-ser
   - **Hosting:** It hosts a room while your computer is offline, and a friend reaches the app through it (local test network).
   - **Revoking:** Revocation reaches the others.
   - **An agent on the node:** handed over sealed, it posts and chats as "you · its name" within its rights; the key is in no file on the computer; revoking it voids what it signs after and the node drops its key. Direct chats stay off the node unless that agent is to read them; then it reads and answers them.
+  - **The agent API:** a token acts as its agent only, within its rights; node-level methods, the daemon's own token, revoked tokens and tokens of revoked agents are refused; MCP through it reads the inbox and posts as "you · agent" (tests on one machine, not in a cluster).
 - **Tried on this computer:** the built Weave Server: `pair`, `join` (with the answer from the app's new Always-on nodes section and from the command line), `run`, `status`, and a clean `weave daemon stop`.
 - **Not tried:** the Docker image and Kubernetes (Docker didn't start here), and a node on another network for days.
