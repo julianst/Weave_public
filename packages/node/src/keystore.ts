@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { b64u, createIdentity, createSubKey, didFromPublicKey, type Did, type SigningIdentity } from '@weave/core';
 import type { Home } from './home.ts';
@@ -64,7 +64,7 @@ export function createAndSaveIdentity(home: Home): SigningIdentity {
   return identity;
 }
 
-const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export function createAndSaveAgent(home: Home, author: Did, name: string, permissions: string[]): AgentKey {
   if (!AGENT_NAME.test(name)) throw new Error('agent names use lowercase letters, digits and dashes');
@@ -77,6 +77,11 @@ export function createAndSaveAgent(home: Home, author: Did, name: string, permis
 /** Save an agent key again (after its permissions changed). */
 export function saveAgent(home: Home, agent: AgentKey): void {
   writeSecretJson(home, join(home.agents, `${agent.name}.json`), toStored(agent, { name: agent.name, permissions: agent.permissions }));
+}
+
+/** Drop an agent's key from this home (an agent handed to an always-on node, gone from it). */
+export function removeAgent(home: Home, name: string): void {
+  rmSync(join(home.agents, `${name}.json`), { force: true });
 }
 
 export function loadAgents(home: Home): AgentKey[] {

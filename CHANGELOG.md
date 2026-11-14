@@ -2,6 +2,49 @@
 
 Every release of Weave, newest first. Versions follow semantic versioning; while it is 0.x, any minor release may change the protocol.
 
+## v0.33.0 · 2026-11-14
+
+- README: keys at rest are sealed with a home key the OS keystore (or TPM, Secure Enclave, YubiKey) holds, not unencrypted; the installers bring the daemon
+- Direct chats on an always-on node: only the agent with the option sees them
+- Layers test: webpush.ts imports node:crypto (Web Push's encryption and VAPID signing), as on main since the Badging change
+- Agent tokens and the agent API: a harness in another pod acts as one agent, without the node's home or powers
+- An agent on your always-on node: made on a computer, its key sealed to the node and kept nowhere else
+- A Microsoft Store build points to the Store for updates, not to a download
+- Weave Web: the number on Weave's icon (Badging API): the app's counts of places and chats together, counted on by the service worker for each push while Weave is closed (OVb4TP5x)
+- Phones: a project's boards in one row that scrolls sideways, not three rows of chips
+- Phones: fold the project hero into a slim bar, show the whole post, chat below it
+- Web Push: a test comes 5 seconds later, a push while Weave is open shows in the app, and the storage node logs what a push service refuses (OVb4TP5x)
+- Web Push for Weave Web, stages 1 and 2: the storage node relays, the browser subscribes with a push key of its own (OVb4TP5x)
+- Services come from releases only: own code (command, wasm/site, bare contract) is gone
+- Starters: the dev loop releases from the folder and moves the service to each new tag
+- Tests add services from releases, not from own code
+- Weave releases: publish a project's release from a local folder, fetched natively from blobs
+- Windows taskbar: a development run gets its own app user model id, and the window carries Weave's icon
+- Storage setup: wait up to three minutes for the node (it took 100 s on storage.martl.io on 14.11.)
+- Add a service: no programs of your own in the app; every service comes with Weave or from a project's release (kSvAG5qb)
+- Link builder: only places you may let people into, Weave Web's own page, its own address on the card
+- Add a service, step by step: which service, where, how it runs; plainer texts (kSvAG5qb)
+- Weave links: a four-step builder, links to anyone or anything, and Open in the Weave app
+- Weave Web check: a website put live on a computer shows on the open Live page, without a reload (OVb4TP5x)
+- Weave Web: the lock screen offers only this browser's passkeys, says plainly what went wrong, and always has a way out (link with a computer, reset); passkeys named by who, device and date (OVb4TP5x)
+- Weave Web: installable on Android as an app of its own (no browser bars): a 192 px icon, a maskable one, id and scope (OVb4TP5x)
+- Weave Web: the code from a computer can be scanned in the page, with the camera (the home-screen app on an iPhone) (OVb4TP5x)
+- Weave Web: a link from a computer can be pasted, for the home-screen app on an iPhone, which a scanned code never reaches (OVb4TP5x)
+- Weave Web: a link from a computer, opened where another account is, offers to empty the browser and link it (OVb4TP5x)
+- Every space of a person on each of their devices: the node index is always written, and every device takes from it (OVb4TP5x)
+- Weave Web: words that don't open the account in this browser say it may hold another, and offer to empty it (OVb4TP5x)
+- Weave Web: boxes hold the identity's current keys, never the words; a stolen passkey is shut out by rotating with the words (OVb4TP5x)
+- Weave Web: the words of an account made on a computer bring it to a browser, from the person's devices through the storage node (OVb4TP5x)
+- Weave Web: the page's files are revalidated on each load, not kept by browsers for 4 hours after a deploy (OVb4TP5x)
+- Weave Web: a passkey or words with no account here say why and what works; a passkey that gives no PRF value is dropped from the keychain where the browser allows (OVb4TP5x)
+- Recovery words: a button copies all 24 at once, numbered; long words stay on their line (OVb4TP5x)
+- Recovery words: a list copied with its numbers or commas is the same 24 words (OVb4TP5x)
+- Storage setup: wait a minute for the node, which takes some 20 s to join the DHT (OVb4TP5x)
+- Weave Web: websites take the whole window on an iPhone, and a first sign-in asks for the passkey (OVb4TP5x)
+- Websites over Weave: a website frame that didn't come through the tunnel says so, with the browser a click away (OVb4TP5x)
+- Storage setup: wait up to a minute for the node to answer (it took 19 s on storage.martl.io)
+- Weave Web: Functions where wrangler takes them, a check that they answer, and playlink.play once
+
 ## v0.32.0 · 2026-11-12
 
 - Weave Web workflow: the Pages folder by its whole path (OVb4TP5x)

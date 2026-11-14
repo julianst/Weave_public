@@ -663,18 +663,49 @@ const PERM_NAMES: Record<(typeof AGENT_KINDS)[number], string> = {
   'weave.app': 'agent.perm.app',
 };
 
+/** The kinds an agent may sign, as checkboxes (the common ones; others it has stay as they are). */
+function AgentKinds({ chosen, onChange }: { chosen: Set<string>; onChange(next: Set<string>): void }) {
+  const { t } = useTexts();
+  const toggle = (kind: string, on: boolean) => {
+    const next = new Set(chosen);
+    if (on) next.add(kind);
+    else next.delete(kind);
+    onChange(next);
+  };
+  return (
+    <>
+      {AGENT_KINDS.map((kind) => (
+        <div className="field-row" key={kind}>
+          <input id={`perm-${kind}`} type="checkbox" checked={chosen.has(kind)} onChange={(e) => toggle(kind, e.target.checked)} />
+          <label htmlFor={`perm-${kind}`} title={kind}>
+            {t(PERM_NAMES[kind])}
+          </label>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** For an agent on an always-on node: whether it reads and answers your direct chats there, and what that means. */
+function DirectChatsChoice({ node, on, onChange }: { node: string; on: boolean; onChange(on: boolean): void }) {
+  const { t } = useTexts();
+  return (
+    <>
+      <div className="field-row">
+        <input id="agent-directs" type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        <label htmlFor="agent-directs">{t('node.agent.directs')}</label>
+      </div>
+      {on && <p className="small notice">{t('node.agent.directs.warn', { node })}</p>}
+    </>
+  );
+}
+
 /** What an agent may sign: checkboxes for the common kinds, saved with updateAgent. */
 function AgentPermissionsDialog({ agent, onClose }: { agent: KeyInfo & { name: string; permissions: string[] }; onClose(): void }) {
   const { t } = useTexts();
   const [chosen, setChosen] = useState(() => new Set(agent.permissions));
+  const [directChats, setDirectChats] = useState(!!agent.directChats);
   const others = agent.permissions.filter((p) => !(AGENT_KINDS as readonly string[]).includes(p));
-  const toggle = (kind: string, on: boolean) =>
-    setChosen((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(kind);
-      else next.delete(kind);
-      return next;
-    });
   return (
     <Modal title={t('agent.may.title', { name: agent.name })} onClose={onClose}>
       <form
@@ -682,19 +713,13 @@ function AgentPermissionsDialog({ agent, onClose }: { agent: KeyInfo & { name: s
         onSubmit={async (e: FormEvent) => {
           e.preventDefault();
           const permissions = [...AGENT_KINDS.filter((k) => chosen.has(k)), ...others];
-          const done = await attempt(() => api('updateAgent', { name: agent.name, permissions }).then(() => (bump(), true)), t('agent.may.saved', { name: agent.name }));
+          const done = await attempt(() => api('updateAgent', { name: agent.name, permissions, ...(agent.node ? { directChats } : {}) }).then(() => (bump(), true)), t('agent.may.saved', { name: agent.name }));
           if (done) onClose();
         }}
       >
         <p className="small">{t('agent.may.intro', { name: agent.name })}</p>
-        {AGENT_KINDS.map((kind) => (
-          <div className="field-row" key={kind}>
-            <input id={`perm-${kind}`} type="checkbox" checked={chosen.has(kind)} onChange={(e) => toggle(kind, e.target.checked)} />
-            <label htmlFor={`perm-${kind}`} title={kind}>
-              {t(PERM_NAMES[kind])}
-            </label>
-          </div>
-        ))}
+        <AgentKinds chosen={chosen} onChange={setChosen} />
+        {agent.node && <DirectChatsChoice node={agent.node.name} on={directChats} onChange={setDirectChats} />}
         {others.length > 0 && (
           <p className="small">
             {t('agent.may.others')} <code>{others.join(', ')}</code>
@@ -705,6 +730,44 @@ function AgentPermissionsDialog({ agent, onClose }: { agent: KeyInfo & { name: s
             {t('button.cancel')}
           </button>
           <button className="default">{t('button.save')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** A new agent on an always-on node: its name, what it may sign, and whether it reads your direct chats there. */
+function NodeAgentDialog({ node, onClose }: { node: string; onClose(): void }) {
+  const { t } = useTexts();
+  const [name, setName] = useState('');
+  const [chosen, setChosen] = useState(() => new Set<string>(['weave.post', 'weave.reply', 'weave.msg']));
+  const [directChats, setDirectChats] = useState(false);
+  return (
+    <Modal title={t('node.agent.title', { node })} onClose={onClose}>
+      <form
+        className="form"
+        onSubmit={async (e: FormEvent) => {
+          e.preventDefault();
+          const agent = name.trim().toLowerCase();
+          const permissions = AGENT_KINDS.filter((k) => chosen.has(k));
+          const done = await attempt(() => api('addNodeAgent', { name: agent, permissions, node, ...(directChats ? { directChats } : {}) }).then(() => (bump(), true)), t('node.agent.added', { name: agent, node }));
+          if (done) onClose();
+        }}
+      >
+        <p className="small">{t('node.agent.intro', { node })}</p>
+        <div className="field-row-stacked">
+          <label htmlFor="node-agent-name">{t('field.name')}</label>
+          <input id="node-agent-name" value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} autoFocus />
+        </div>
+        <AgentKinds chosen={chosen} onChange={setChosen} />
+        <DirectChatsChoice node={node} on={directChats} onChange={setDirectChats} />
+        <div className="buttons">
+          <button type="button" onClick={onClose}>
+            {t('button.cancel')}
+          </button>
+          <button className="default" disabled={!name.trim() || !chosen.size}>
+            {t('button.add')}
+          </button>
         </div>
       </form>
     </Modal>
@@ -770,25 +833,56 @@ function AlwaysOnNodes({ keys }: { keys: KeyInfo[] }) {
   const nodes = keys.filter((k) => k.name?.startsWith('node:'));
   const [request, setRequest] = useState('');
   const [answer, setAnswer] = useState<{ answer: string; name: string }>();
+  const [adding, setAdding] = useState<string>();
+  const [editing, setEditing] = useState<KeyInfo & { name: string; permissions: string[] }>();
   return (
     <fieldset>
       <legend>{t('nodes.legend')}</legend>
       {nodes.map((n) => (
-        <div className="field-row" key={n.did}>
-          <Icon name="community" />
-          <span className="grow">
-            <b>{n.name!.slice(5)}</b>{' '}
-            <span className="small muted">
-              {n.revokedAfter !== undefined ? t('key.revoked') : n.lastTime ? t('node.last.heard', { time: n.lastTime }) : t('node.not.heard')} · {t('key.events', { n: n.events })}
+        <div key={n.did}>
+          <div className="field-row">
+            <Icon name="community" />
+            <span className="grow">
+              <b>{n.name!.slice(5)}</b>{' '}
+              <span className="small muted">
+                {n.revokedAfter !== undefined ? t('key.revoked') : n.lastTime ? t('node.last.heard', { time: n.lastTime }) : t('node.not.heard')} · {t('key.events', { n: n.events })}
+              </span>
             </span>
-          </span>
+            {n.revokedAfter === undefined && (
+              <AsyncButton onClick={async () => (await ask(t('node.revoke.ask', { name: n.name!.slice(5) }), t('button.revoke'))) && attempt(() => api('revokeKey', { key: n.did }).then(bump), t('key.revoked.done'))}>
+                {t('button.revoke')}
+              </AsyncButton>
+            )}
+          </div>
           {n.revokedAfter === undefined && (
-            <AsyncButton onClick={async () => (await ask(t('node.revoke.ask', { name: n.name!.slice(5) }), t('button.revoke'))) && attempt(() => api('revokeKey', { key: n.did }).then(bump), t('key.revoked.done'))}>
-              {t('button.revoke')}
-            </AsyncButton>
+            <div style={{ marginLeft: '2em' }}>
+              {keys
+                .filter((a) => a.node?.did === n.did && a.revokedAfter === undefined && a.name)
+                .map((a) => (
+                  <div className="field-row" key={a.did}>
+                    <Icon name="gear" />
+                    <span className="grow">
+                      <b>{a.name}</b>{' '}
+                      <span className="small muted">
+                        {(a.permissions ?? []).map((p) => ((AGENT_KINDS as readonly string[]).includes(p) ? t(PERM_NAMES[p as (typeof AGENT_KINDS)[number]]) : p)).join(', ')}
+                        {a.directChats ? ` · ${t('node.agent.directs.on')}` : ''}
+                      </span>
+                    </span>
+                    <button onClick={() => setEditing({ ...a, name: a.name!, permissions: a.permissions ?? [] })}>{t('agent.permissions')}</button>
+                    <AsyncButton onClick={async () => (await ask(t('agent.revoke.ask', { name: a.name }), t('button.revoke'))) && attempt(() => api('revokeKey', { key: a.did }).then(bump), t('agent.revoked', { name: a.name }))}>
+                      {t('button.revoke')}
+                    </AsyncButton>
+                  </div>
+                ))}
+              <div className="buttons">
+                <button onClick={() => setAdding(n.name!.slice(5))}>{t('node.agent.add')}</button>
+              </div>
+            </div>
           )}
         </div>
       ))}
+      {adding && <NodeAgentDialog node={adding} onClose={() => setAdding(undefined)} />}
+      {editing && <AgentPermissionsDialog agent={editing} onClose={() => setEditing(undefined)} />}
       {nodes.some((n) => n.revokedAfter === undefined) && <FrontDoor />}
       <p className="small">
         {t('nodes.about')} <Info>{t('nodes.about.more')}</Info>
@@ -1076,6 +1170,7 @@ export function KeysView() {
                   {k.current && <span className="tag friend">{t('key.this.device')}</span>}
                   {k.forked && <span className="tag rejected">{t('key.forked')}</span>}
                   {k.revokedAfter !== undefined && <span className="tag">{t('key.revoked')}</span>}
+                  {k.node && k.revokedAfter === undefined && <span className="tag">{t('node.agent.on', { node: k.node.name })}</span>}
                   <div className="small muted">
                     {t('key.events', { n: k.events })}
                     {k.lastTime ? t('key.last', { time: k.lastTime }) : ''}

@@ -154,7 +154,7 @@ npx weave --home .dev/bob vote <id> yes
 npx weave --home .dev/carol delegate Bob -p Synths                     # Bob's vote counts for Carol's
 ```
 
-Commands talk to the daemon when one is running and open the home directly when not, so posting and reading also work offline. `weave --help` lists everything. `weave keys`, `weave revoke` and `weave rotate` manage devices, agents and root keys; device and encryption keys are stored unencrypted in the home for now.
+Commands talk to the daemon when one is running and open the home directly when not, so posting and reading also work offline. `weave --help` lists everything. `weave keys`, `weave revoke` and `weave rotate` manage devices, agents and root keys; device and encryption keys are sealed in the home with a key the operating system's keystore holds (see Known limitations).
 
 ## Agents
 
@@ -167,6 +167,8 @@ claude mcp add weave -- node /path/to/weave/packages/cli/src/main.ts mcp --as fo
 ```
 
 Everything the agent does is signed with its own key and shows up as "you · forge". The tools cover projects, groups, communities, posts and their chats, boards, upvotes, issues and votes (voting only if you granted `weave.vote`). `weave_inbox` hands out what's new since the last call, flags messages that mention `@forge`, and can wait for the next event, so an agent can sit in a loop and answer when addressed. With `weave.react` it can also react, say 👀 when it picks something up and ✅ when it's done. Harnesses that prefer the command line can use `weave watch --as forge --mentions --json`. With `weave.github.repo` it can link GitHub repositories to spaces you own or maintain, and with `weave.app` publish a project's app and point it at a GitHub release; the MCP server also tells the harness how these flows go and which steps only you can do (approving the GitHub sign-in and app install on github.com).
+
+An agent can also live on your always-on node, answering while your computers are off, under its own key and never as you: `weave agent add <name> --node <node>` (see [docs/always-on-node.md](docs/always-on-node.md#an-agent-on-your-always-on-node)).
 
 ## GitHub
 
@@ -257,9 +259,9 @@ This is a first version; these are deliberate simplifications to revisit:
 - **Removed members** keep everything they could read before; only later events are protected by the new key. In groups only the founder can remove members; in projects the maintainers can, in communities the moderators.
 - **Timestamps** are claimed by the author and used for ordering and display only.
 - **Metadata:** peers on a shared topic replicate all logs, so they can see that someone posted to a project or group and when, though not what.
-- **Device and encryption keys** are stored unencrypted in the Weave home, readable by any program running as you, AI agents included. Root keys aren't stored at all. Next: keys held by the OS (TPM, Secure Enclave), agent-scoped access to the daemon, and confirmations for key management.
+- **Keys at rest:** files with device and encryption keys are sealed with a home key. The operating system's keystore holds it (DPAPI on Windows, Keychain on macOS, Secret Service on Linux), or hardware you choose with `weave keystore` (TPM, Secure Enclave, YubiKey), so a copied home opens nowhere else. A program running as you on the same computer can still ask that keystore, AI agents included. Without a keystore (a container, `WEAVE_KEYSTORE=file`) the home key lies in the home itself (`vault.json`); Weave Server can keep it in a key service instead (Vault, Azure Key Vault, AWS KMS, Google Cloud KMS). Root keys aren't stored at all.
 - **Identities made before recovery words** (by earlier versions) can't rotate keys or add devices; create a new one.
-- **The desktop app** starts its daemon with the system's Node.js from this repository; a packaged app will bundle it.
+- **The desktop app** brings its own daemon in the installers; run from a checkout, it starts the daemon with the system's Node.js.
 
 ## License
 

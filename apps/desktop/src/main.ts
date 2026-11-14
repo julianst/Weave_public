@@ -600,7 +600,10 @@ async function createWindow(): Promise<void> {
   });
   if (!values.screenshot) createTray();
   // Links in messages open in the system browser, never inside the app; Weave links open here.
-  const external = (url: string) => (LINK.test(url) ? openLink(url) : /^https?:\/\//.test(url) && void shell.openExternal(url));
+  // The one non-web link the app itself makes: a Store build's updates, in the Microsoft Store.
+  const STORE_UPDATES = 'ms-windows-store://downloadsandupdates';
+  const external = (url: string) =>
+    LINK.test(url) ? openLink(url) : /^https?:\/\//.test(url) ? void shell.openExternal(url) : url === STORE_UPDATES && process.windowsStore && void shell.openExternal(url);
   window.webContents.setWindowOpenHandler(({ url }) => {
     external(url);
     return { action: 'deny' };

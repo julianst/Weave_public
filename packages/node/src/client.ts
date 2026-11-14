@@ -1,4 +1,5 @@
 import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { errorFromWire, type ErrorAnswer } from '@weave/core';
 import { RPC_METHODS, type Backend, type FeedItem, type RpcMethod } from './backend.ts';
 import { readJson, type Home } from './home.ts';
@@ -24,8 +25,9 @@ export class ApiClient {
   readonly base: string;
   readonly #token: string;
 
-  constructor(port: number, token: string) {
-    this.base = `http://127.0.0.1:${port}/v1`;
+  /** `port`: the daemon's on this computer; or a URL (http(s)://host:port) of a node's agent API, with an agent token. */
+  constructor(port: number | string, token: string) {
+    this.base = typeof port === 'number' ? `http://127.0.0.1:${port}/v1` : `${port.replace(/\/+$/, '')}/v1`;
     this.#token = token;
     return new Proxy(this, {
       get(target, prop) {
@@ -41,7 +43,7 @@ export class ApiClient {
   call<T = unknown>(method: RpcMethod, args: unknown[]): Promise<T> {
     const payload = JSON.stringify({ method, args });
     return new Promise((resolve, reject) => {
-      const req = httpRequest(
+      const req = (this.base.startsWith('https:') ? httpsRequest : httpRequest)(
         `${this.base}/rpc`,
         {
           method: 'POST',
@@ -157,6 +159,33 @@ export function followDaemon(home: Home): Backend {
     get(_target, prop) {
       if (prop === 'watch') return watch;
       if (typeof prop === 'string' && RPC_METHODS.includes(prop as RpcMethod)) return (...args: unknown[]) => call(prop as RpcMethod, args);
+      return undefined;
+    },
+  });
+}
+
+/**
+ * A Backend on another node's agent API (weave daemon --agent-api), as the agent its token is for: no home, no
+ * daemon here. Calls go there one by one; the event stream reconnects by itself.
+ */
+export function remoteAgent(url: string, token: string): Backend {
+  if (!/^https?:\/\//.test(url)) throw new Error(`the agent API is an http(s) address, e.g. http://weave:7712 (not ${url})`);
+  const client = new ApiClient(url, token);
+  const watch = async (onItem: (item: FeedItem) => void, signal: AbortSignal): Promise<void> => {
+    while (!signal.aborted) {
+      try {
+        await client.watch(onItem, signal);
+      } catch {
+        // not reachable just now: look again shortly
+      }
+      if (signal.aborted) return;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  };
+  return new Proxy({} as Backend, {
+    get(_target, prop) {
+      if (prop === 'watch') return watch;
+      if (typeof prop === 'string' && RPC_METHODS.includes(prop as RpcMethod)) return (...args: unknown[]) => client.call(prop as RpcMethod, args);
       return undefined;
     },
   });

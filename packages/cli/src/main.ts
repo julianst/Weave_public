@@ -13,6 +13,8 @@ import {
   daemonInfo,
   stopDaemon,
   followDaemon,
+  remoteAgent,
+  agentReads,
   checkManifest,
   MANIFEST_EXAMPLE,
   MANIFEST_RULES,
@@ -94,6 +96,7 @@ A company's own projects and groups are its company spaces.
   backup <folder or file>    save your Weave as one encrypted file (only your recovery words open it): nobody else can bring your data back
   whoami                     show your identity and agents
   daemon                     run your node: connect to peers, serve the local API
+                             [--agent-api <host:port>]: also an API for agent tokens only, e.g. 0.0.0.0:7712 in a cluster
   daemon stop | restart      stop the running daemon properly (or restart it, e.g. for new code)   [--force: end it hard if it won't]
   status                     node status: peers, groups, projects, communities
   keystore [os|tpm|secure-enclave|yubikey|file]   where this computer keeps the key to your keys (hardware: tpm, secure-enclave, yubikey)
@@ -105,13 +108,20 @@ A company's own projects and groups are its company spaces.
   post <text...>             publish a short text post (public unless -p/-g/-r)   [--as <agent>]
   feed                       show recent posts         [-p <project> | -g <group>] [-n <count>] [--all]
   watch                      stream new events (needs a running daemon)  [--as <agent> --mentions]
+                             [--api <url> --token <agent token>]: from another node's agent API instead
   mcp                        serve this node to an agent harness over MCP (stdio)  [--as <agent>]
+                             [--api <url> --token <agent token>]: another node's agent API, as the token's agent
+                             (or WEAVE_AGENT_API and WEAVE_AGENT_TOKEN); no home or daemon here
   claude-bundle              write weave.mcpb: Weave for the Claude desktop app's chat, as an agent
                              [--as <agent>] [--out <file>] [--open: show Claude's install dialog]
   join <topic>               listen on a DHT topic
   agent add <name>           create a key for an agent [--can <kinds>]  default: weave.post,weave.reply
+                             [--node <node>]: its key goes to that always-on node, sealed, and stays off this computer
+                             [--direct-chats]: with --node, it reads and answers your direct chats there too
   agent can <name> <kinds>   change what an agent may sign, e.g. weave.post,weave.post.coauthor
-  agent list                 list your agents
+                             [--direct-chats | --no-direct-chats]: for one on an always-on node
+  agent list                 list your agents (those on always-on nodes too)
+  agent token <name>         a token for an agent held here, for the agent API (weave daemon --agent-api)  [--revoke]
   bootstrap <host:port...>   use these DHT bootstrap nodes (e.g. a local testnet); --clear for defaults
 
 groups — collections of people, with their own chat:
@@ -442,6 +452,11 @@ const { values, positionals } = parseArgs({
     as: { type: 'string' },
     kind: { type: 'string' },
     can: { type: 'string' },
+    api: { type: 'string' },
+    revoke: { type: 'boolean' },
+    'agent-api': { type: 'string' },
+    'direct-chats': { type: 'boolean' },
+    'no-direct-chats': { type: 'boolean' },
     n: { type: 'string', short: 'n' },
     clear: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
@@ -579,6 +594,15 @@ const [command, ...args] = positionals;
 /** The running daemon if there is one; otherwise the node opened directly (offline). */
 /** A release build of this command, or the source (development). */
 const BUILD: 'release' | 'dev' = typeof WEAVE_VERSION === 'string' ? 'release' : 'dev';
+
+/** Another node's agent API, as an agent token's agent (--api and --token, or WEAVE_AGENT_API and WEAVE_AGENT_TOKEN). */
+function agentApiFromFlags(): Backend | undefined {
+  const url = values.api ?? process.env.WEAVE_AGENT_API;
+  const token = values.token ?? process.env.WEAVE_AGENT_TOKEN;
+  if (!url && !token) return undefined;
+  if (!url || !token) throw new Error('the agent API takes both: --api <url> and --token <agent token> (or WEAVE_AGENT_API and WEAVE_AGENT_TOKEN)');
+  return remoteAgent(url, token);
+}
 
 async function backend(options: { needsDaemon?: boolean } = {}): Promise<Backend> {
   const daemon = await connectDaemon(home);
@@ -1201,10 +1225,11 @@ async function main(): Promise<void> {
       // A stop asked for while it's still starting (its API is up first) is kept, and done once it can be.
       let stopAsked = false;
       let shutdown = async () => void (stopAsked = true);
-      const daemon = await startDaemon(home.dir, { version: VERSION, build: BUILD, startedBy: process.env.WEAVE_DAEMON_STARTED_BY === 'app' ? 'app' : 'cli', onStopRequest: () => void shutdown() });
+      const daemon = await startDaemon(home.dir, { version: VERSION, build: BUILD, startedBy: process.env.WEAVE_DAEMON_STARTED_BY === 'app' ? 'app' : 'cli', onStopRequest: () => void shutdown(), ...(values['agent-api'] ? { agentApi: values['agent-api'] } : {}) });
       const status = await daemon.node.status();
       console.log(`weave daemon for ${status.name ?? status.did}`);
       console.log(`  home ${home.dir}\n  api  http://127.0.0.1:${daemon.port}\n  ${status.groups} groups, ${status.projects} projects, ${status.communities} communities`);
+      if (daemon.agentApi) console.log(`  agent api ${daemon.agentApi.host}:${daemon.agentApi.port} (agent tokens only: keep it on your cluster's network)`);
       daemon.node.replica.onAppend((event) => {
         if (event.signer === daemon.node.identity.did) return;
         const item = daemon.node.itemFor(event);
@@ -1334,7 +1359,10 @@ async function main(): Promise<void> {
     }
 
     case 'watch': {
-      const client = await backend({ needsDaemon: true });
+      const remote = agentApiFromFlags();
+      const local = remote ?? (await backend({ needsDaemon: true }));
+      // As an agent: what it reads (on an always-on node, no direct chats for one without the option).
+      const client = values.as && !remote ? agentReads(local, values.as) : local;
       const controller = new AbortController();
       process.on('SIGINT', () => controller.abort());
       // --mentions: only items that address the agent (or you) as @name.
@@ -1348,6 +1376,13 @@ async function main(): Promise<void> {
 
     case 'mcp': {
       // stdout belongs to the MCP protocol from here on; messages for people go to stderr.
+      // Another node's agent API, as the token's agent: no home here, no daemon.
+      const remote = agentApiFromFlags();
+      if (remote) {
+        const { serveStdio } = await import('@weave/mcp');
+        const me = await remote.whoami();
+        return serveStdio(remote, { as: me.agents[0]?.name });
+      }
       // The daemon is the one process writing to the home, and the only way to see what peers send.
       // Follow it rather than pin it: it may start later, or restart on another port.
       const b = followDaemon(home);
@@ -1386,20 +1421,34 @@ async function main(): Promise<void> {
 
     case 'agent': {
       const [sub, name] = args;
+      const directChats = values['direct-chats'] ? true : values['no-direct-chats'] ? false : undefined;
       if (sub === 'add' && name) {
         const permissions = (values.can ?? 'weave.post,weave.reply').split(',').map((p) => p.trim()).filter(Boolean);
+        if (directChats && !values.node) throw new Error('--direct-chats is for an agent on an always-on node: add --node <node>');
+        if (values.node) {
+          const agent = await (await backend()).addNodeAgent({ name, permissions, node: values.node, ...(directChats ? { directChats } : {}) });
+          return out(agent, () => `agent ${agent.name} created on ${agent.node!.name}\n  ${agent.did}\n  can: ${agent.permissions.join(', ')}${agent.directChats ? '\n  reads and answers your direct chats there' : ''}\n  its key went to ${agent.node!.name}, sealed: this computer keeps none of it\n  use it there with: weave mcp --as ${agent.name}  (or weave watch --as ${agent.name})`);
+        }
         const agent = await (await backend()).addAgent(name, permissions);
         return out(agent, () => `agent ${agent.name} created\n  ${agent.did}\n  can: ${agent.permissions.join(', ')}\n  use it with: weave post --as ${agent.name} "..."`);
       }
       if (sub === 'list') {
-        const { agents } = await (await backend()).whoami();
-        return out(agents, () => agents.map((a) => `${a.name}  ${a.did}  can: ${a.permissions.join(', ')}`).join('\n') || '(no agents)');
+        const b = await backend();
+        const [{ agents: here }, keys] = await Promise.all([b.whoami(), b.keys()]);
+        const away = keys.filter((k) => k.node && k.name && k.revokedAfter === undefined).map((k) => ({ name: k.name!, did: k.did, permissions: k.permissions ?? [], node: k.node, ...(k.directChats ? { directChats: true } : {}) }));
+        const agents = [...here, ...away];
+        return out(agents, () => agents.map((a) => `${a.name}  ${a.did}  can: ${a.permissions.join(', ')}${a.node ? `  on ${a.node.name}${a.directChats ? ' (direct chats too)' : ''}` : ''}`).join('\n') || '(no agents)');
+      }
+      if (sub === 'token' && name) {
+        const answer = await (await backend()).agentToken({ name, ...(values.revoke ? { revoke: true } : {}) });
+        if (answer.token) return out(answer, () => `${answer.token}\n  acts as ${answer.agent} only, through the agent API (weave daemon --agent-api <host:port>)\n  keep it secret, e.g. in a Kubernetes Secret; revoke with: weave agent token ${answer.agent} --revoke`);
+        return out(answer, () => `revoked ${answer.revoked} token${answer.revoked === 1 ? '' : 's'} of ${answer.agent}`);
       }
       if (sub === 'can' && name && args[2]) {
-        const agent = await (await backend()).updateAgent({ name, permissions: args[2].split(',') });
-        return out(agent, () => `agent ${agent.name} can now: ${agent.permissions.join(', ')}`);
+        const agent = await (await backend()).updateAgent({ name, permissions: args[2].split(','), ...(directChats !== undefined ? { directChats } : {}) });
+        return out(agent, () => `agent ${agent.name} can now: ${agent.permissions.join(', ')}${agent.node ? ` (on ${agent.node.name}${agent.directChats ? ', direct chats too' : ''})` : ''}`);
       }
-      throw new Error('usage: weave agent add <name> [--can <kinds>] | weave agent can <name> <kinds> | weave agent list');
+      throw new Error('usage: weave agent add <name> [--can <kinds>] [--node <node> [--direct-chats]] | weave agent can <name> <kinds> [--direct-chats|--no-direct-chats] | weave agent list | weave agent token <name> [--revoke]');
     }
 
     case 'group': {
