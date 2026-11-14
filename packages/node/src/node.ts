@@ -163,6 +163,7 @@ import { Verifiers } from './verifiers.ts';
 import type { Grant as ServiceGrant } from './servicesettings.ts';
 import type { Registered as ServiceRegistered } from './register.ts';
 import { NODE_PREFIX, Services } from './services.ts';
+import { NodeAgents } from './nodeagents.ts';
 import { BROWSER_PREFIX, browserLinkUrl, linkToken, sealLink } from './browserlink.ts';
 
 /** An identity's current root and encryption keys (currentKeys), what a browser's box holds instead of the words. */
@@ -890,6 +891,8 @@ export class WeaveNode implements Backend {
   /** Company accounts: their group and spaces, sign-in, attestor, policy, escrow, audit, SCIM, console (companies.ts). */
   #companies: Companies = new Companies(this, WeaveNode.companiesCore(this));
   #services: Services = new Services(WeaveNode.servicesHost(this), () => this.#website);
+  /** Agents on always-on nodes: handed over from a computer, signing on the node (nodeagents.ts). */
+  #nodeAgents: NodeAgents = new NodeAgents(WeaveNode.servicesHost(this), () => this.#services, () => this.#forgetDirects());
   /** Websites (rooms) of the room service, and the app API that tells them who is visiting (see website.ts). */
   #website: Website = new Website(WeaveNode.websiteHost(this), () => this.#services);
   /** Boards' client services, run here for this member. */
@@ -1286,6 +1289,14 @@ export class WeaveNode implements Backend {
     return this.replica.authority.grant(this.identity.did)?.name?.startsWith(NODE_PREFIX) === true;
   }
 
+  /**
+   * Whether this node opens its person's direct chats: every device does; an always-on node passes them on sealed (as a
+   * front door), and opens them only while an agent handed to it reads them (addNodeAgent with directChats).
+   */
+  get takesDirectChats(): boolean {
+    return !this.#isLinkedNode || this.#nodeAgents.directChatsHere();
+  }
+
   /** Our spaces for our always-on nodes: all but direct chats, with their keys. */
   #nodeSpaces(): unknown[] {
     return [...this.#spaces.values()]
@@ -1465,6 +1476,8 @@ export class WeaveNode implements Backend {
     const space = input.space ? this.#kernel.space(input.space) : undefined;
     if (space && space.kind !== 'direct' && this.#kernel.state(space).closed) throw new WeaveError('daemon.space.closed', { space: space.name }, `${space.name} is closed: it's kept as it is, read-only`);
     if (space && input.as) this.#kernel.visitorMay(space, signer.did, input.as, input.kind);
+    // On an always-on node, only an agent handed over for them writes in direct chats.
+    if (space?.kind === 'direct' && input.as && this.#isLinkedNode && !this.#nodeAgents.readsDirectChats(input.as)) throw new Error(`${input.as} isn't one for your direct chats on this node: turn that on for it on one of your computers (weave agent can ${input.as} <kinds> --direct-chats)`);
     if (space?.kind === 'project') inner = this.#kernel.forBoard(space, inner);
     const fields: EventFields = space ? sealFor(await this.#managed.cipherReady(space), inner) : inner;
     const event = this.replica.write(signer, fields);
@@ -2043,8 +2056,20 @@ export class WeaveNode implements Backend {
     return this.#content.votingDelegate(...args);
   }
 
-  async updateAgent(input: { name: string; permissions: string[] }): Promise<AgentInfo> {
+  async addNodeAgent(input: { name: string; permissions: string[]; node: string; directChats?: boolean }): Promise<AgentInfo> {
+    const mine = this.replica.authority.grant(this.identity.did);
+    if (this.identity.did !== this.identity.author && mine?.role !== 'device') throw new Error('add agents for your always-on node from one of your own computers');
+    return this.#nodeAgents.add(input);
+  }
+
+  async updateAgent(input: { name: string; permissions: string[]; directChats?: boolean }): Promise<AgentInfo> {
     const agent = this.#agents.find((a) => a.name === input.name);
+    const away = agent || this.#isLinkedNode ? undefined : this.#nodeAgents.handedAgents().get(input.name);
+    if (away) {
+      if (this.replica.authority.grant(away.did)?.revokedAfter !== undefined) throw new Error(`${away.agent} is revoked`);
+      return this.#nodeAgents.change(away, { permissions: input.permissions, ...(input.directChats !== undefined ? { directChats: input.directChats } : {}) });
+    }
+    if (input.directChats !== undefined) throw new Error(`${input.name} isn't on an always-on node: it reads your direct chats wherever it runs`);
     if (!agent) throw new WeaveError('daemon.agent.none', { name: input.name }, `no agent named "${input.name}"`);
     const permissions = [...new Set(input.permissions.map((p) => p.trim()).filter(Boolean))];
     if (permissions.includes('*')) throw new WeaveError('daemon.agent.all.permissions', undefined, "agents can't get every permission: name the kinds they may sign");
@@ -2105,6 +2130,8 @@ export class WeaveNode implements Backend {
     }
     // On an always-on node: services handed over by its person's computers.
     changed += await this.#services.takeHandovers();
+    // And agents handed to it: their keys, rights, or that they're gone.
+    changed += this.#nodeAgents.take();
     for (const project of [...this.#spaces.values()].filter((s) => s.kind === 'project')) {
       const state = this.#kernel.state(project);
       if (!state.members.has(this.identity.author)) continue;
@@ -2331,10 +2358,13 @@ export class WeaveNode implements Backend {
   async keys(): Promise<KeyInfo[]> {
     const me = this.identity.author;
     const out: KeyInfo[] = [];
+    // Agents on always-on nodes, as this computer's handovers say (a node lists the ones it holds as its own).
+    const away = new Map(this.#isLinkedNode ? [] : [...this.#nodeAgents.handedAgents().values()].map((h) => [h.did, this.#nodeAgents.info(h)]));
     for (const grant of this.replica.authority.grantsOf(me)) {
       const signer = grant.subject;
       const head = this.replica.eventsBy(signer).at(-1);
-      const held = grant.role === 'agent' ? this.#agents.find((a) => a.did === signer) : undefined;
+      const held = grant.role === 'agent' ? (this.#agents.find((a) => a.did === signer) ?? away.get(signer)) : undefined;
+      const onNode = away.get(signer)?.node;
       out.push({
         did: signer,
         role: grant.role,
@@ -2345,6 +2375,7 @@ export class WeaveNode implements Backend {
         ...(head ? { lastTime: head.time } : {}),
         forked: this.replica.forks.has(signer),
         ...(held ? { permissions: held.permissions } : {}),
+        ...(onNode ? { node: onNode, ...(away.get(signer)?.directChats ? { directChats: true } : {}) } : {}),
       });
     }
     return out.sort((a, b) => Number(b.current) - Number(a.current) || a.role.localeCompare(b.role) || (a.name ?? '').localeCompare(b.name ?? ''));
@@ -2375,6 +2406,9 @@ export class WeaveNode implements Backend {
     if (key.role === 'agent' && !input.words) {
       if (ownDevice) throw new Error('that is this device');
       this.replica.write(this.identity, revocation(key.did, afterSeq, heads));
+      // An agent on an always-on node: the node drops its key.
+      const away = this.#isLinkedNode ? undefined : this.#nodeAgents.byKey(key.did);
+      if (away) this.#nodeAgents.change(away, { removed: true });
     } else {
       if (!input.words) throw new Error('revoking a device needs your recovery words');
       const root = this.#currentRoot(input.words);
@@ -2698,6 +2732,8 @@ export class WeaveNode implements Backend {
   // ---------------------------------------------------------------- direct chats between friends
 
   async chats(): Promise<ChatInfo[]> {
+    // An always-on node keeps its person's direct chats sealed, unless an agent there reads them.
+    if (!this.takesDirectChats) return [];
     const friends = new Set(this.#kernel.friends());
     this.#kernel.decodeAll();
     const chats: ChatInfo[] = [];

@@ -168,6 +168,8 @@ claude mcp add weave -- node /path/to/weave/packages/cli/src/main.ts mcp --as fo
 
 Everything the agent does is signed with its own key and shows up as "you · forge". The tools cover projects, groups, communities, posts and their chats, boards, upvotes, issues and votes (voting only if you granted `weave.vote`). `weave_inbox` hands out what's new since the last call, flags messages that mention `@forge`, and can wait for the next event, so an agent can sit in a loop and answer when addressed. With `weave.react` it can also react, say 👀 when it picks something up and ✅ when it's done. Harnesses that prefer the command line can use `weave watch --as forge --mentions --json`. With `weave.github.repo` it can link GitHub repositories to spaces you own or maintain, and with `weave.app` publish a project's app and point it at a GitHub release; the MCP server also tells the harness how these flows go and which steps only you can do (approving the GitHub sign-in and app install on github.com).
 
+An agent can also live on your always-on node, answering while your computers are off, under its own key and never as you: `weave agent add <name> --node <node>` (see [docs/always-on-node.md](docs/always-on-node.md#an-agent-on-your-always-on-node)).
+
 ## GitHub
 
 Groups, tiers and projects can link GitHub repositories: members who give the space their GitHub account get read access, and lose it again when they leave. The repository must belong to a GitHub organization (free to make): a personal account's repositories can't give anyone read-only access, only write. Projects can also point their app at a GitHub release, so hosts install it with one click (each file is checked against a SHA-256 a maintainer published in Weave).

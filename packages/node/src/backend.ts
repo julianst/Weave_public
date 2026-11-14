@@ -91,6 +91,10 @@ export interface AgentInfo {
   name: string;
   did: Did;
   permissions: string[];
+  /** An agent on one of your always-on nodes: its key is there, not on this computer. */
+  node?: { did: Did; name: string };
+  /** On that node it reads and answers your direct chats too. */
+  directChats?: boolean;
 }
 
 export interface Whoami {
@@ -132,8 +136,12 @@ export interface KeyInfo {
   events: number;
   lastTime?: string;
   forked: boolean;
-  /** For agents whose key this node holds: the kinds it may sign (updateAgent changes them). */
+  /** For agents whose key this node holds, or on one of your always-on nodes: the kinds it may sign (updateAgent changes them). */
   permissions?: string[];
+  /** An agent on one of your always-on nodes: its key is there, not here. */
+  node?: { did: Did; name: string };
+  /** That agent reads and answers your direct chats on the node. */
+  directChats?: boolean;
 }
 
 export interface Status {
@@ -2310,8 +2318,14 @@ export interface Backend {
   connectHarness(input: { harness: string; on: boolean }): Promise<{ offered: boolean; harnesses: HarnessInfo[] }>;
   /** Not now: don't offer connecting harnesses again (Keys & devices still can). */
   dismissHarnesses(): Promise<void>;
-  /** Change what one of your agents may sign (e.g. add weave.post.coauthor to let it confirm co-authorships). */
-  updateAgent(input: { name: string; permissions: string[] }): Promise<AgentInfo>;
+  /**
+   * An agent on one of your always-on nodes (by its name or key): its key is made here and sealed to that node, never
+   * kept here; it signs there under its own name, with exactly these rights. `directChats`: it reads and answers your
+   * direct chats there too (the node then takes them). Revoke it like any agent; the node drops its key.
+   */
+  addNodeAgent(input: { name: string; permissions: string[]; node: string; directChats?: boolean }): Promise<AgentInfo>;
+  /** Change what one of your agents may sign (e.g. add weave.post.coauthor to let it confirm co-authorships); for one on an always-on node, also whether it reads your direct chats. */
+  updateAgent(input: { name: string; permissions: string[]; directChats?: boolean }): Promise<AgentInfo>;
   /** An agent asks its person to let it sign more kinds; the request waits in their Inbox (or is already answered). */
   requestPermission(input: { as: string; kinds: string[]; reason?: string }): Promise<PermissionRequest>;
   /** An agent asks its person to hand a project repositories from their keyvault for a platform (github): waits in their Inbox, like a permission. */
@@ -2714,7 +2728,7 @@ export type RpcMethod = Exclude<keyof Backend, 'watch'>;
 export { LENS_CSP } from './lenscsp.ts';
 
 export const RPC_METHODS: readonly RpcMethod[] = [
-  'whoami', 'publish', 'feed', 'addAgent', 'updateAgent', 'join', 'status',
+  'whoami', 'publish', 'feed', 'addAgent', 'addNodeAgent', 'updateAgent', 'join', 'status',
   'spaces', 'createGroup', 'createProject', 'invite', 'joinSpace', 'lookAtInvite', 'createOnboardLink', 'onboardLinks', 'revokeOnboardLink', 'lookAtOnboardLink', 'followOnboardLink', 'playLinks', 'removePlayLink', 'pairPhone', 'phones', 'unpairPhone', 'setHomeVisibility', 'followBoard', 'leave', 'handOver', 'closeSpace', 'setHistory', 'setBoardRule', 'keepPost', 'fading', 'shred', 'fetchOlder', 'keepers', 'letCopiesGo', 'dropKept', 'manageSpace', 'unlockSpace', 'destroyCompanyKey', 'signIn', 'setHold', 'approveAgent', 'setVisitors', 'agentBlocked', 'escrowRecovery', 'openEscrow', 'createCompany', 'company', 'companyAction', 'enrollLink', 'inviteByEmail', 'link', 'links', 'setScim', 'scim', 'setConsole', 'consoleInfo', 'companySignIn', 'signInStatus', 'consoleOperatorLink', 'backup', 'saveBackup', 'keystores', 'moveHomeKey', 'linkNode', 'linkBrowser', 'addAuditStream', 'removeAuditStream', 'auditStreams', 'exportSpace', 'audit', 'knocks', 'answerKnock', 'setBoardAccess', 'members', 'removeMember',
   'addService', 'artifacts', 'catalog', 'catalogArtifact', 'listInCatalog', 'unlistFromCatalog', 'openWebsite', 'services', 'setService', 'removeService', 'serviceProfiles', 'servicesIn', 'shippedServices', 'serviceActions', 'servicePanels', 'serviceLists', 'setServicePolicy', 'setArtifactAccess', 'withdrawArtifact', 'launchWebsite', 'programConsents', 'withdrawProgramConsent', 'releaseFile', 'getArtifactFile', 'artifactFileJob', 'fetchers', 'addFetcher', 'setFetcher', 'removeFetcher', 'keyvaults', 'addKeyvault', 'removeKeyvault', 'addClientApp', 'removeClientApp', 'setupPacks', 'startKeyvaultApp', 'keyvaultOwners', 'finishKeyvaultApp', 'keyvaultReachable', 'removeKeyvaultApp', 'handKeyvault', 'serviceSettings', 'setServiceSetting', 'startServiceSignIn', 'finishServiceSignIn', 'askService', 'serviceRequests', 'platforms', 'accountProof', 'linkAccount', 'startAccountProof', 'finishAccountProof', 'accounts', 'myAccounts',
   'createCommunity', 'community', 'setCommunity', 'setModerator',

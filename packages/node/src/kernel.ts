@@ -1305,6 +1305,8 @@ export class Kernel {
         if (candidate.id === scope.id) space = candidate;
       }
       // The setting and the company halves are sealed with the Weave half alone; nothing else counts that way in a managed space.
+      // An always-on node passes its person's direct chats on, sealed, but opens them only for an agent there that reads them.
+      if (space?.kind === 'direct' && !this.node.takesDirectChats) return undefined;
       const raw = space ? openIn(space, event) : undefined;
       const inner = space && (openIn(this.core.managed.cipher(space), event) ?? (raw && (raw.kind === KIND_KMS || raw.kind === KIND_MANAGED) ? raw : undefined));
       if (!inner) return undefined;

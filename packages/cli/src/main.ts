@@ -110,8 +110,11 @@ A company's own projects and groups are its company spaces.
                              [--as <agent>] [--out <file>] [--open: show Claude's install dialog]
   join <topic>               listen on a DHT topic
   agent add <name>           create a key for an agent [--can <kinds>]  default: weave.post,weave.reply
+                             [--node <node>]: its key goes to that always-on node, sealed, and stays off this computer
+                             [--direct-chats]: with --node, it reads and answers your direct chats there too
   agent can <name> <kinds>   change what an agent may sign, e.g. weave.post,weave.post.coauthor
-  agent list                 list your agents
+                             [--direct-chats | --no-direct-chats]: for one on an always-on node
+  agent list                 list your agents (those on always-on nodes too)
   bootstrap <host:port...>   use these DHT bootstrap nodes (e.g. a local testnet); --clear for defaults
 
 groups — collections of people, with their own chat:
@@ -442,6 +445,8 @@ const { values, positionals } = parseArgs({
     as: { type: 'string' },
     kind: { type: 'string' },
     can: { type: 'string' },
+    'direct-chats': { type: 'boolean' },
+    'no-direct-chats': { type: 'boolean' },
     n: { type: 'string', short: 'n' },
     clear: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
@@ -1386,20 +1391,29 @@ async function main(): Promise<void> {
 
     case 'agent': {
       const [sub, name] = args;
+      const directChats = values['direct-chats'] ? true : values['no-direct-chats'] ? false : undefined;
       if (sub === 'add' && name) {
         const permissions = (values.can ?? 'weave.post,weave.reply').split(',').map((p) => p.trim()).filter(Boolean);
+        if (directChats && !values.node) throw new Error('--direct-chats is for an agent on an always-on node: add --node <node>');
+        if (values.node) {
+          const agent = await (await backend()).addNodeAgent({ name, permissions, node: values.node, ...(directChats ? { directChats } : {}) });
+          return out(agent, () => `agent ${agent.name} created on ${agent.node!.name}\n  ${agent.did}\n  can: ${agent.permissions.join(', ')}${agent.directChats ? '\n  reads and answers your direct chats there' : ''}\n  its key went to ${agent.node!.name}, sealed: this computer keeps none of it\n  use it there with: weave mcp --as ${agent.name}  (or weave watch --as ${agent.name})`);
+        }
         const agent = await (await backend()).addAgent(name, permissions);
         return out(agent, () => `agent ${agent.name} created\n  ${agent.did}\n  can: ${agent.permissions.join(', ')}\n  use it with: weave post --as ${agent.name} "..."`);
       }
       if (sub === 'list') {
-        const { agents } = await (await backend()).whoami();
-        return out(agents, () => agents.map((a) => `${a.name}  ${a.did}  can: ${a.permissions.join(', ')}`).join('\n') || '(no agents)');
+        const b = await backend();
+        const [{ agents: here }, keys] = await Promise.all([b.whoami(), b.keys()]);
+        const away = keys.filter((k) => k.node && k.name && k.revokedAfter === undefined).map((k) => ({ name: k.name!, did: k.did, permissions: k.permissions ?? [], node: k.node, ...(k.directChats ? { directChats: true } : {}) }));
+        const agents = [...here, ...away];
+        return out(agents, () => agents.map((a) => `${a.name}  ${a.did}  can: ${a.permissions.join(', ')}${a.node ? `  on ${a.node.name}${a.directChats ? ' (direct chats too)' : ''}` : ''}`).join('\n') || '(no agents)');
       }
       if (sub === 'can' && name && args[2]) {
-        const agent = await (await backend()).updateAgent({ name, permissions: args[2].split(',') });
-        return out(agent, () => `agent ${agent.name} can now: ${agent.permissions.join(', ')}`);
+        const agent = await (await backend()).updateAgent({ name, permissions: args[2].split(','), ...(directChats !== undefined ? { directChats } : {}) });
+        return out(agent, () => `agent ${agent.name} can now: ${agent.permissions.join(', ')}${agent.node ? ` (on ${agent.node.name}${agent.directChats ? ', direct chats too' : ''})` : ''}`);
       }
-      throw new Error('usage: weave agent add <name> [--can <kinds>] | weave agent can <name> <kinds> | weave agent list');
+      throw new Error('usage: weave agent add <name> [--can <kinds>] [--node <node> [--direct-chats]] | weave agent can <name> <kinds> [--direct-chats|--no-direct-chats] | weave agent list');
     }
 
     case 'group': {

@@ -11,6 +11,7 @@
     "storage": "node src/storage.ts"
   },
   "dependencies": {
+    "@weave/mcp": "*",
     "@weave/node": "*"
   },
   "devDependencies": {

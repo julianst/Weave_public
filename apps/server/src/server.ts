@@ -5,6 +5,8 @@
 //   weave-server link        a new enrollment link for colleagues
 //   weave-server operator    a one-time link into the admin console
 //   weave-server status      what it runs, and where
+//   weave-server mcp --as <agent>     an agent handed to this always-on node, over MCP (stdio)
+//   weave-server watch               what arrives on this node (JSON lines)
 //
 // Its home is WEAVE_HOME (/data in the container). The key service's secret
 // comes from its settings: WEAVE_VAULT_TOKEN, WEAVE_AZURE_CLIENT_SECRET for
@@ -17,7 +19,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { connectDaemon, loadConfig, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
+import { connectDaemon, followDaemon, loadConfig, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
 
 declare const WEAVE_VERSION: string | undefined;
 const VERSION = typeof WEAVE_VERSION === 'string' ? WEAVE_VERSION : 'dev';
@@ -50,6 +52,7 @@ const { values, positionals } = parseArgs({
     'no-input': { type: 'boolean', default: false },
     standby: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
+    as: { type: 'string' },
   },
 });
 const command = positionals[0] ?? 'run';
@@ -67,6 +70,8 @@ const HELP = `weave-server ${VERSION}: a company's own Weave node
   For your own always-on node (no company): keeps your spaces and hosts your rooms while your computers are off
   weave-server pair [name]                  a request: paste it on one of your computers (weave node add, or Keys & devices)
   weave-server join <answer | file | ->     finish with the answer from your computer (or a file holding it, or - to read it), then: weave-server run
+  weave-server mcp --as <agent>             an agent handed to this node (weave agent add <agent> --node <node>), over MCP (stdio)
+  weave-server watch                        what arrives on this node, as JSON lines
 
   weave-server backup <folder>              a consistent copy of this server's home, while it runs
   weave-server restore <folder> [--standby] set this home up from a backup (--standby: follow the active one, write nothing)
@@ -284,6 +289,18 @@ async function main(): Promise<void> {
       return void console.log(await (await client()).enrollLink({ days: 30 }));
     case 'operator':
       return void console.log(await (await client()).consoleOperatorLink());
+    case 'mcp': {
+      // An agent handed to this always-on node: a harness here talks to the running node as that agent.
+      if (!values.as) throw new Error('usage: weave-server mcp --as <agent> (an agent added for this node: weave agent add <agent> --node <node>)');
+      const { serveStdio } = await import('@weave/mcp');
+      return serveStdio(followDaemon(home), { as: values.as });
+    }
+    case 'watch': {
+      const c = await client();
+      const controller = new AbortController();
+      process.on('SIGINT', () => controller.abort());
+      return c.watch((item) => console.log(JSON.stringify(item)), controller.signal);
+    }
     case 'status': {
       const c = await client();
       const company = await c.company();
