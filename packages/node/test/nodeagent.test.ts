@@ -79,7 +79,7 @@ describe('an agent on an always-on node', () => {
     // The node takes it.
     sync(martl, box);
     expect(await box.reconcile()).toBeGreaterThan(0);
-    expect((await box.whoami()).agents).toEqual([{ name: 'claude', did: claude.did, permissions: ['weave.post', 'weave.reply', 'weave.msg'] }]);
+    expect((await box.whoami()).agents).toEqual([{ name: 'claude', did: claude.did, permissions: ['weave.post', 'weave.reply', 'weave.msg'], directChats: false }]);
 
     // The key is on the node only: nothing in martl's home has it, not even sealed in a file.
     const secret = loadAgents(resolveHome(boxDir)).find((a) => a.name === 'claude')!.keys.secretKey;

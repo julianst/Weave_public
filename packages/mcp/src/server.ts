@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { z } from 'zod';
 import { MCP_APP_MIME, POST_CARD_HTML, POST_CARD_URI } from './postcard.ts';
-import { checkManifest, MANIFEST_EXAMPLE, MANIFEST_RULES, noAgent, releaseWorkflow, wasmReleaseWorkflow, type Backend, type FeedItem, type SessionInfo, type SessionRef } from '@weave/node';
+import { agentReads, checkManifest, MANIFEST_EXAMPLE, MANIFEST_RULES, noAgent, releaseWorkflow, wasmReleaseWorkflow, type Backend, type FeedItem, type SessionInfo, type SessionRef } from '@weave/node';
 
 export interface WeaveMcpOptions {
   /** Agent name to sign every write with; its delegated permissions apply. Without it, writes are signed as the person. */
@@ -174,7 +174,8 @@ export function agentView(backend: Backend, as: string): Backend {
  */
 export function createWeaveMcp(node: Backend, options: WeaveMcpOptions = {}) {
   const as = options.as;
-  const backend = as ? agentView(node, as) : node;
+  // As an agent: what it reads (on an always-on node, no direct chats for one without the option), where it may.
+  const backend = as ? agentView(agentReads(node, as), as) : node;
   const server = new McpServer({ name: 'weave', version: VERSION }, { instructions: INSTRUCTIONS });
 
   // ---------------------------------------------------------------- inbox

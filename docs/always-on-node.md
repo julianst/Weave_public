@@ -31,9 +31,10 @@ rooms only, and your identity and recovery words stay on your computers.
 - **Direct chats:** not on the node, unless you say so for that agent (`--direct-chats`, or the checkbox in the app).
   Then the node takes your direct chats too (it derives their keys from your encryption keys, which it already
   holds), and that agent reads them and answers there under its own key ("you · its name"). Other agents on the node
-  see them arrive too, but can't write there. Turn it off, or revoke the agent, and the node lets your direct chats go
-  again. While it's on, the keys to your direct chats are on the node too: keep the node as private as a computer of
-  yours.
+  see nothing of them: not in their inbox, `watch`, chats, messages or feed, locally (`mcp --as`, `watch --as`) or
+  through an agent token, and they can't write there. Turn it off, or revoke the agent, and the node lets your direct
+  chats go again. While it's on, the keys to your direct chats are on the node too: keep the node as private as a
+  computer of yours. (Whoever can run commands on the node itself, beyond its agents, can still read them there.)
 - **Its key:** made on your computer, sealed so that only that node opens it, and kept nowhere else. Your computer
   never stores it.
 - **Changing and revoking:** like any agent. `weave agent can <name> <kinds>` changes its rights (add
@@ -56,7 +57,7 @@ to the running node as that agent:
 
 ```bash
 weave-server mcp --as claude        # MCP over stdio, for the harness's config
-weave-server watch                  # what arrives, as JSON lines
+weave-server watch --as claude      # what arrives for claude, as JSON lines
 ```
 
 With the `weave` command line on the node instead, it's `weave mcp --as claude` and `weave watch --as claude`.

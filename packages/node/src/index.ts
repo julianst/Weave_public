@@ -117,7 +117,7 @@ export { startAgentApi, startApi, type ApiServer } from './api.ts';
 export { startLinks, type LinkServer } from './links.ts';
 export { claudeBundle, zip, type ClaudeBundleOptions } from './mcpb.ts';
 export { ApiClient, connectDaemon, daemonInfo, followDaemon, remoteAgent, stopDaemon, type DaemonInfo } from './client.ts';
-export { AGENT_TOKEN_METHODS, type AgentGrant } from './agentapi.ts';
+export { AGENT_TOKEN_METHODS, agentReads, type AgentGrant } from './agentapi.ts';
 export { loadConfig, parseBootstrap, saveConfig, type Config } from './config.ts';
 export { startDaemon, type Daemon } from './daemon.ts';
 export { FileStore } from './filestore.ts';

@@ -93,3 +93,81 @@ export function agentWatch(backend: Backend, grant: AgentGrant, onItem: (item: F
     if (!hidden(item, grant)) onItem(item);
   }, signal);
 }
+
+/**
+ * A Backend as one of the agents this node holds sees it (`mcp --as`, `watch --as` on the node itself): on an always-on
+ * node, an agent without the direct-chats option sees nothing of the person's direct chats, while the node opens them
+ * for another agent that has it. Everything else passes through. Elsewhere (whoami names no option) nothing changes.
+ */
+export function agentReads(backend: Backend, name: string): Backend {
+  let grant: Promise<AgentGrant | undefined> | undefined;
+  const scoped = () =>
+    (grant ??= backend.whoami().then((me) => {
+      const agent = me.agents.find((a) => a.name === name);
+      // Only a node says whether its agents read direct chats: there, one that doesn't sees none.
+      return agent && agent.directChats === false ? { name, did: agent.did, directChats: false } : undefined;
+    }).catch((error: unknown) => {
+      grant = undefined;
+      throw error;
+    }));
+  const call = (m: RpcMethod, a: unknown[]) => (backend[m] as (...x: unknown[]) => Promise<unknown>).apply(backend, a);
+  const READ_FILTERED = new Set(['feed', 'spaces', 'posts', 'post', 'chats', 'openChat', 'messages', 'channels', 'say', 'react', 'deleteMessage']);
+  return new Proxy(backend, {
+    get(target, prop) {
+      if (prop === 'watch')
+        return async (onItem: (item: FeedItem) => void, signal: AbortSignal) => {
+          const g = await scoped();
+          return g ? target.watch((item) => void (directHidden(item, g) ? undefined : onItem(item)), signal) : target.watch(onItem, signal);
+        };
+      if (typeof prop === 'string' && READ_FILTERED.has(prop))
+        return async (...args: unknown[]) => {
+          const g = await scoped();
+          if (!g) return call(prop as RpcMethod, args);
+          return directsFiltered(backend, g, prop, args, call);
+        };
+      // Bound to the node itself: its private fields aren't reachable through the proxy.
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+/** In a direct chat, for an agent that doesn't read them. */
+const directHidden = (item: { space?: { kind?: string } }, grant: AgentGrant): boolean => item.space?.kind === 'direct' && !grant.directChats;
+
+/** The reads (and chat writes) that touch direct chats, for an agent that doesn't read them. */
+async function directsFiltered(backend: Backend, grant: AgentGrant, method: string, args: unknown[], call: (m: RpcMethod, a: unknown[]) => Promise<unknown>): Promise<unknown> {
+  const isChat = async (ref: unknown): Promise<boolean> => {
+    if (typeof ref !== 'string') return false;
+    const chats = await backend.chats();
+    const r = ref.toLowerCase();
+    return chats.some((c: ChatInfo) => c.space.id === ref || c.peer.did === ref || c.space.name.toLowerCase() === r || c.peer.name?.toLowerCase() === r);
+  };
+  switch (method) {
+    case 'feed':
+      return ((await call('feed', args)) as FeedItem[]).filter((i) => !directHidden(i, grant));
+    case 'spaces':
+      return ((await call('spaces', args)) as Array<{ kind?: string }>).filter((sp) => sp.kind !== 'direct');
+    case 'posts':
+      return ((await call('posts', args)) as Array<{ space?: { kind?: string } }>).filter((p) => !directHidden(p, grant));
+    case 'post': {
+      const post = (await call('post', args)) as { space?: { kind?: string } };
+      if (directHidden(post, grant)) throw directsOff();
+      return post;
+    }
+    case 'chats':
+      return [];
+    case 'openChat':
+      throw directsOff();
+    case 'messages':
+    case 'channels':
+      if (await isChat(args[0])) throw directsOff();
+      return call(method, args);
+    default: {
+      // say, react, deleteMessage: not into a direct chat.
+      const input = (args[0] ?? {}) as { space?: unknown };
+      if (await isChat(input.space)) throw directsOff();
+      return call(method as RpcMethod, args);
+    }
+  }
+}

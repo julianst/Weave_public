@@ -14,6 +14,7 @@ import {
   stopDaemon,
   followDaemon,
   remoteAgent,
+  agentReads,
   checkManifest,
   MANIFEST_EXAMPLE,
   MANIFEST_RULES,
@@ -1359,7 +1360,9 @@ async function main(): Promise<void> {
 
     case 'watch': {
       const remote = agentApiFromFlags();
-      const client = remote ?? (await backend({ needsDaemon: true }));
+      const local = remote ?? (await backend({ needsDaemon: true }));
+      // As an agent: what it reads (on an always-on node, no direct chats for one without the option).
+      const client = values.as && !remote ? agentReads(local, values.as) : local;
       const controller = new AbortController();
       process.on('SIGINT', () => controller.abort());
       // --mentions: only items that address the agent (or you) as @name.

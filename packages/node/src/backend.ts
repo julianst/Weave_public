@@ -93,7 +93,7 @@ export interface AgentInfo {
   permissions: string[];
   /** An agent on one of your always-on nodes: its key is there, not on this computer. */
   node?: { did: Did; name: string };
-  /** On that node it reads and answers your direct chats too. */
+  /** On that node it reads and answers your direct chats too (on the node itself: false for an agent that doesn't). */
   directChats?: boolean;
 }
 

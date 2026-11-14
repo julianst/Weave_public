@@ -8,7 +8,7 @@
 //   weave-server mcp --as <agent>     an agent handed to this always-on node, over MCP (stdio)
 //   weave-server mcp --api <url> --token <t>   the same from another pod, through the node's agent API (no home)
 //   weave-server agent-token <agent> [--revoke]  a token for the agent API (weave-server run --agent-api <host:port>)
-//   weave-server watch               what arrives on this node (JSON lines)
+//   weave-server watch [--as <agent>]   what arrives on this node, or what that agent reads (JSON lines)
 //
 // Its home is WEAVE_HOME (/data in the container). The key service's secret
 // comes from its settings: WEAVE_VAULT_TOKEN, WEAVE_AZURE_CLIENT_SECRET for
@@ -21,7 +21,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { connectDaemon, followDaemon, loadConfig, remoteAgent, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
+import { agentReads, connectDaemon, followDaemon, loadConfig, remoteAgent, moveHomeKeyToKeyService, resolveHome, saveConfig, startDaemon, WeaveNode, type CreateCompanyInput } from '@weave/node';
 
 declare const WEAVE_VERSION: string | undefined;
 const VERSION = typeof WEAVE_VERSION === 'string' ? WEAVE_VERSION : 'dev';
@@ -80,7 +80,7 @@ const HELP = `weave-server ${VERSION}: a company's own Weave node
   weave-server agent-token <agent> [--revoke]   a token that acts as that agent only, for the agent API
   weave-server run --agent-api 0.0.0.0:7712     also serve the agent API (agent tokens only; or WEAVE_AGENT_API_LISTEN)
   weave-server mcp --api <url> --token <token>  in another pod: MCP through a node's agent API (or WEAVE_AGENT_API, WEAVE_AGENT_TOKEN)
-  weave-server watch                        what arrives on this node, as JSON lines
+  weave-server watch [--as <agent>]         what arrives on this node (or what that agent reads), as JSON lines
 
   weave-server backup <folder>              a consistent copy of this server's home, while it runs
   weave-server restore <folder> [--standby] set this home up from a backup (--standby: follow the active one, write nothing)
@@ -321,7 +321,8 @@ async function main(): Promise<void> {
       return void console.log(answer.token ?? `revoked ${answer.revoked} token${answer.revoked === 1 ? '' : 's'} of ${answer.agent}`);
     }
     case 'watch': {
-      const c = await client();
+      // --as: what that agent reads (no direct chats for one without the option).
+      const c = values.as ? agentReads(followDaemon(home), values.as) : await client();
       const controller = new AbortController();
       process.on('SIGINT', () => controller.abort());
       return c.watch((item) => console.log(JSON.stringify(item)), controller.signal);

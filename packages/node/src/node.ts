@@ -1456,7 +1456,7 @@ export class WeaveNode implements Backend {
 
   async whoami(): Promise<Whoami> {
     const org = this.replica.authority.keys(this.identity.author).org;
-    return { did: this.identity.author, name: this.nameOf(this.identity.author), ...(org ? { company: { did: org, name: this.nameOf(org) } } : {}), agents: this.#agents.map(agentInfo), signer: this.identity.did };
+    return { did: this.identity.author, name: this.nameOf(this.identity.author), ...(org ? { company: { did: org, name: this.nameOf(org) } } : {}), agents: this.#agents.map((a) => (this.#isLinkedNode ? { ...agentInfo(a), directChats: this.#nodeAgents.readsDirectChats(a.name) } : agentInfo(a))), signer: this.identity.did };
   }
 
   async publish(input: PublishInput): Promise<FeedItem> {
