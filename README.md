@@ -154,7 +154,7 @@ npx weave --home .dev/bob vote <id> yes
 npx weave --home .dev/carol delegate Bob -p Synths                     # Bob's vote counts for Carol's
 ```
 
-Commands talk to the daemon when one is running and open the home directly when not, so posting and reading also work offline. `weave --help` lists everything. `weave keys`, `weave revoke` and `weave rotate` manage devices, agents and root keys; device and encryption keys are stored unencrypted in the home for now.
+Commands talk to the daemon when one is running and open the home directly when not, so posting and reading also work offline. `weave --help` lists everything. `weave keys`, `weave revoke` and `weave rotate` manage devices, agents and root keys; device and encryption keys are sealed in the home with a key the operating system's keystore holds (see Known limitations).
 
 ## Agents
 
@@ -259,9 +259,9 @@ This is a first version; these are deliberate simplifications to revisit:
 - **Removed members** keep everything they could read before; only later events are protected by the new key. In groups only the founder can remove members; in projects the maintainers can, in communities the moderators.
 - **Timestamps** are claimed by the author and used for ordering and display only.
 - **Metadata:** peers on a shared topic replicate all logs, so they can see that someone posted to a project or group and when, though not what.
-- **Device and encryption keys** are stored unencrypted in the Weave home, readable by any program running as you, AI agents included. Root keys aren't stored at all. Next: keys held by the OS (TPM, Secure Enclave), agent-scoped access to the daemon, and confirmations for key management.
+- **Keys at rest:** files with device and encryption keys are sealed with a home key. The operating system's keystore holds it (DPAPI on Windows, Keychain on macOS, Secret Service on Linux), or hardware you choose with `weave keystore` (TPM, Secure Enclave, YubiKey), so a copied home opens nowhere else. A program running as you on the same computer can still ask that keystore, AI agents included. Without a keystore (a container, `WEAVE_KEYSTORE=file`) the home key lies in the home itself (`vault.json`); Weave Server can keep it in a key service instead (Vault, Azure Key Vault, AWS KMS, Google Cloud KMS). Root keys aren't stored at all.
 - **Identities made before recovery words** (by earlier versions) can't rotate keys or add devices; create a new one.
-- **The desktop app** starts its daemon with the system's Node.js from this repository; a packaged app will bundle it.
+- **The desktop app** brings its own daemon in the installers; run from a checkout, it starts the daemon with the system's Node.js.
 
 ## License
 
