@@ -87,6 +87,7 @@ const MAY_USE_NODE = [
   'wasmworker.ts',
   // Releases from Weave: a maintainer's folder packed (tar) and kept as blobs, put together again on members' nodes.
   'weavereleases.ts',
+  'webpush.ts',
   'website.ts',
   'websocket.ts',
 ];
