@@ -686,9 +686,21 @@ menu[role='tablist'] { margin-bottom: 0; }
 .admission .note { margin-top: 3px; padding: 2px 6px; background: #ffffe1; border: 1px solid #c0c0a0; font-style: italic; }
 
 /* ---------- keys */
-.words { display: grid; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr)); gap: 4px 12px; margin: 8px 0; padding: 10px 12px; list-style: none; font: 13px 'Lucida Console', Consolas, monospace; }
+/* The recovery words in four columns, read down (1-6, then 7-12, ...), as they're written on paper: always 4 x 6, so no
+   width or font breaks the rows somewhere else. */
+.words { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: 4px 12px; margin: 8px 0; padding: 10px 12px; list-style: none; font: 13px 'Lucida Console', Consolas, monospace; }
 .words .n { display: inline-block; width: 2.2em; color: #777; text-align: right; }
 .words li { white-space: nowrap; }
+/* By the room the box has (a phone, a narrow window, a wide look), not the screen: tighter first, then two columns
+   (1-12, 13-24) where four don't fit. */
+.words-box { container: words / inline-size; }
+@container words (max-width: 460px) {
+  .words { gap: 4px 8px; padding: 6px; font-size: 11px; }
+  .words .n { width: 1.9em; font-size: 10px; }
+}
+@container words (max-width: 350px) {
+  .words { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(12, auto); font-size: 12px; }
+}
 .keys-table { width: 100%; border-collapse: collapse; font-family: var(--content-font); font-size: 12px; }
 .keys-table td { padding: 4px 6px; border-bottom: 1px solid #d4d4d4; vertical-align: middle; }
 .keys-table td:last-child { text-align: right; }
@@ -803,13 +815,6 @@ textarea.code { font-family: 'Lucida Console', Consolas, monospace; font-size: 1
   input, textarea, select { font-size: 16px !important; }
   .page { font-size: 14px; }
   .window.modal, .window.modal.wide { width: calc(100vw - 12px) !important; max-width: none; max-height: calc(100dvh - 24px); overflow-y: auto; }
-  /* The recovery words in four columns, read down: 1-6, then 7-12, as they're written on paper. */
-  .words { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: 4px; padding: 6px; font-size: 11px; }
-  .words .n { width: 1.9em; font-size: 10px; }
-}
-/* Too narrow for four (under 360px): two columns, 1-12 and 13-24. */
-@media (max-width: 359px) {
-  .words { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(12, auto); font-size: 12px; }
 }
 
 /* Phones: a project's hero folds into a slim bar (icon, title, status, the banner behind), and a post and its chat
