@@ -478,7 +478,8 @@ window.weave = {
   pickFolder: async () => undefined,
   show: async () => window.focus(),
   // Nowhere serves a view's files here: one sandboxed page builds each view from them (lens-frame.html, lens.tsx).
-  lensBase: () => '/lens-frame.html',
+  // Without .html: Pages sends /lens-frame.html on to /lens-frame, and a frame mustn't land on a redirect.
+  lensBase: () => '/lens-frame',
   attention: async () => {},
   // As the desktop's preload answers: {result}, or the error as it came, which the renderer throws.
   call: (method, ...args) => ask(method, ...args),

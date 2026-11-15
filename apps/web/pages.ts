@@ -55,6 +55,11 @@ writeFileSync(
     '  Cache-Control: no-cache',
     '',
     // Lenses' and widgets' views: sandboxed, framed by the page only (build.ts, lensFrameCsp), in place of the page's CSP.
+    // Pages serves lens-frame.html at /lens-frame (and sends .html on there): both get it.
+    '/lens-frame',
+    '  ! Content-Security-Policy',
+    `  Content-Security-Policy: ${lensFrameCsp}`,
+    '',
     '/lens-frame.html',
     '  ! Content-Security-Policy',
     `  Content-Security-Policy: ${lensFrameCsp}`,
