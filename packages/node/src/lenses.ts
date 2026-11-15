@@ -25,10 +25,78 @@ const LENS_WEAVE_KINDS = new Set(['weave.post', 'weave.post.edit', 'weave.upvote
 /** The largest file of a lens's view this node hands out (they travel as JSON, to phones too). */
 const LENS_FILE_MAX = 5_000_000;
 
-/** A lens ready to use on this node: where it runs, and its renderer's folder. */
-interface Ready {
+/** A lens (or a group widget) ready to use on this node: where it runs, and its renderer's folder. */
+export interface Ready {
   key: string;
   site?: string;
+}
+
+/** A pure component of a release (a lens's or a widget's): what to fetch, and where its parts are in it. */
+export interface PureComponent {
+  /** Where it runs (the runtime's key), and its own folder on this node. */
+  key: string;
+  dir: string;
+  name: string;
+  tag: string;
+  origin: { project: string; release: string };
+  manifest: AppManifest;
+  part: { component: string; site?: string };
+}
+
+/**
+ * Fetch a pure component's release (once), transpile its component, and run it with nothing to call: ready to fold
+ * and act. `ready` keeps what is being made ready, by key, so it happens once.
+ */
+export function preparePure(h: ServicesHost, ready: Map<string, Promise<Ready>>, c: PureComponent): Promise<Ready> {
+  const before = ready.get(c.key);
+  if (before && h.runtime.running(c.key)) return before;
+  const making = (async (): Promise<Ready> => {
+    const root = await releaseFolder(h, c.dir, { origin: c.origin, tag: c.tag, manifest: c.manifest });
+    if (!existsSync(joinPath(root, c.part.component))) throw new Error(`${c.name} ${c.tag} has no ${c.part.component}`);
+    const entry = await prepareWasm(joinPath(root, c.part.component), joinPath(c.dir, 'wasm'));
+    h.runtime.startWasm(
+      c.key,
+      {
+        dir: joinPath(c.dir, 'wasm'),
+        entry,
+        data: joinPath(c.dir, 'data'),
+        log: joinPath(c.dir, 'lens.log'),
+        name: c.name,
+        host: () => {
+          throw new Error('a client service calls nothing: it only folds and acts');
+        },
+      },
+      // Stopped (it crashed, or hung): started again when it's next asked for.
+      () => {},
+    );
+    return { key: c.key, ...(c.part.site ? { site: joinPath(root, c.part.site) } : {}) };
+  })();
+  ready.set(c.key, making);
+  making.catch(() => ready.delete(c.key));
+  return making;
+}
+
+/** A file of a pure component's site (its renderer's folder), for the app's sandboxed frame: nothing outside it. */
+export function siteFile(site: string, name: string, path: string): { type: string; data: string } {
+  const root = resolvePath(site);
+  let file = resolvePath(root, `.${('/' + path).replace(/\\/g, '/')}`);
+  if (file !== root && !file.startsWith(root + sep)) throw new Error(`not in ${name}'s view`);
+  if (existsSync(file) && statSync(file).isDirectory()) file = joinPath(file, 'index.html');
+  if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`not in ${name}'s view`);
+  if (statSync(file).size > LENS_FILE_MAX) throw new Error(`${path} is larger than a view's file may be (${LENS_FILE_MAX / 1_000_000} MB)`);
+  return { type: TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', data: readFileSync(file).toString('base64') };
+}
+
+/** What a component's act answered: a list of proposed events (unchecked), or why not. */
+export function proposedEvents(name: string, result: unknown): unknown[] {
+  let proposed: unknown;
+  try {
+    proposed = JSON.parse(String(result));
+  } catch {
+    throw new Error(`${name} proposed something that isn't JSON`);
+  }
+  if (!Array.isArray(proposed)) throw new Error(`${name} proposed something that isn't a list of events`);
+  return proposed;
 }
 
 /**
@@ -60,7 +128,9 @@ export async function releaseFolder(h: ServicesHost, dir: string, r: { origin: {
 export class Lenses {
   readonly h: ServicesHost;
   readonly #svc: () => Services;
-  /** Lenses being made ready (fetched, transpiled, started), by release. */
+  /** A group widget's site, by its release: set by the node (widgets.ts), only for what its person approved. */
+  widgetSite?: (release: string) => Promise<{ site: string; name: string } | undefined>;
+  /** Lenses being made ready (fetched, transpiled, started), by their runtime key. */
   #ready = new Map<string, Promise<Ready>>();
   /** The last state folded per board, by what it was folded from. */
   #folded = new Map<string, { from: string; state: Json }>();
@@ -131,39 +201,20 @@ export class Lenses {
 
   /** Fetch a lens's package (once per release), transpile its component, and run it: ready to fold and act. */
   #prepare(lens: BoardLens): Promise<Ready> {
-    const key = `lens:${lens.origin.release}`;
-    const before = this.#ready.get(lens.origin.release);
-    if (before && this.h.runtime.running(key)) return before;
-    const ready = (async (): Promise<Ready> => {
-      const dir = joinPath(this.h.home.dir, 'lenses', lens.origin.release.slice(0, 40));
-      const client = lens.manifest.client!;
-      const root = await releaseFolder(this.h, dir, lens);
-      if (!existsSync(joinPath(root, client.component))) throw new Error(`${lens.name} ${lens.tag} has no ${client.component}`);
-      const entry = await prepareWasm(joinPath(root, client.component), joinPath(dir, 'wasm'));
-      this.h.runtime.startWasm(
-        key,
-        {
-          dir: joinPath(dir, 'wasm'),
-          entry,
-          data: joinPath(dir, 'data'),
-          log: joinPath(dir, 'lens.log'),
-          name: lens.name,
-          host: () => {
-            throw new Error('a client service calls nothing: it only folds and acts');
-          },
-        },
-        // Stopped (it crashed, or hung): started again when it's next asked for.
-        () => {},
-      );
-      return { key, ...(client.site ? { site: joinPath(root, client.site) } : {}) };
-    })();
-    this.#ready.set(lens.origin.release, ready);
-    ready.catch(() => this.#ready.delete(lens.origin.release));
-    return ready;
+    const client = lens.manifest.client!;
+    return preparePure(this.h, this.#ready, { key: `lens:${lens.origin.release}`, dir: joinPath(this.h.home.dir, 'lenses', lens.origin.release.slice(0, 40)), name: lens.name, tag: lens.tag, origin: lens.origin, manifest: lens.manifest, part: client });
   }
 
-  /** A file of a lens's view (its site): of a lens pinned to a board here, made ready if it isn't yet. */
+  /**
+   * A file of a lens's view (its site): of a lens pinned to a board here, made ready if it isn't yet. A group widget's
+   * view comes the same way ("widget-<release>"), only once you approved it (widgets.ts).
+   */
   async lensFile(input: { release: string; path: string }): Promise<{ type: string; data: string }> {
+    if (input.release.startsWith('widget-')) {
+      const widget = this.widgetSite ? await this.widgetSite(input.release.slice(7)) : undefined;
+      if (!widget) throw new Error('no widget you approved here is that one');
+      return siteFile(widget.site, widget.name, input.path);
+    }
     // A shipped service's panels: the pages that ship with this Weave, by its name.
     const shipped = input.release.startsWith('shipped-') ? this.#svc().shippedPanelFolder(input.release.slice(8)) : undefined;
     const lens = shipped ? undefined : this.#pinned(input.release);
@@ -171,13 +222,7 @@ export class Lenses {
     const site = shipped ?? (await this.#prepare(lens!)).site;
     const name = shipped ? input.release.slice(8) : lens!.name;
     if (!site) throw new Error(`${name} has no view of its own`);
-    const root = resolvePath(site);
-    let file = resolvePath(root, `.${('/' + input.path).replace(/\\/g, '/')}`);
-    if (file !== root && !file.startsWith(root + sep)) throw new Error(`not in ${name}'s view`);
-    if (existsSync(file) && statSync(file).isDirectory()) file = joinPath(file, 'index.html');
-    if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`not in ${name}'s view`);
-    if (statSync(file).size > LENS_FILE_MAX) throw new Error(`${input.path} is larger than a view's file may be (${LENS_FILE_MAX / 1_000_000} MB)`);
-    return { type: TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', data: readFileSync(file).toString('base64') };
+    return siteFile(site, name, input.path);
   }
 
   /** The lens a board here is pinned to, by its release. */
@@ -239,13 +284,7 @@ export class Lenses {
     const result = await this.h.runtime.callWasm(ready.key, 'act', asked).catch((error: Error) => {
       throw new Error(`${lens.name} won't: ${error.message}`);
     });
-    let proposed: unknown;
-    try {
-      proposed = JSON.parse(String(result));
-    } catch {
-      throw new Error(`${lens.name} proposed something that isn't JSON`);
-    }
-    if (!Array.isArray(proposed)) throw new Error(`${lens.name} proposed something that isn't a list of events`);
+    const proposed = proposedEvents(lens.name, result);
     const posts = this.#posts(space, board.name);
     const writes = lens.manifest.client!.writes;
     // All checked before any is published: an action happens whole, or not at all.
