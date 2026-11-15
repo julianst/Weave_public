@@ -803,6 +803,13 @@ textarea.code { font-family: 'Lucida Console', Consolas, monospace; font-size: 1
   input, textarea, select { font-size: 16px !important; }
   .page { font-size: 14px; }
   .window.modal, .window.modal.wide { width: calc(100vw - 12px) !important; max-width: none; max-height: calc(100dvh - 24px); overflow-y: auto; }
+  /* The recovery words in four columns, read down: 1-6, then 7-12, as they're written on paper. */
+  .words { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: 4px; padding: 6px; font-size: 11px; }
+  .words .n { width: 1.9em; font-size: 10px; }
+}
+/* Too narrow for four (under 360px): two columns, 1-12 and 13-24. */
+@media (max-width: 359px) {
+  .words { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(12, auto); font-size: 12px; }
 }
 
 /* Phones: a project's hero folds into a slim bar (icon, title, status, the banner behind), and a post and its chat
