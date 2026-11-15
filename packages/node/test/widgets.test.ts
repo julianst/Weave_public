@@ -6,6 +6,7 @@ import type { AppManifest, Json } from '@weave/core';
 import { closeOpenStores, WeaveNode } from '../src/index.ts';
 import { buildComponent } from './helpers/components.ts';
 import { folderWith, releaseFolder, shareBlobs } from './helpers/release.ts';
+import { unpackPure } from '../src/lenses.ts';
 
 /*
  * Group widgets (docs/group-widgets.md): a mini-app sent into a group's chat. Each message is one instance, folded
@@ -159,6 +160,16 @@ describe('group widgets', { timeout: 120_000 }, () => {
     const view = await martl.widgetView({ message: sent.id });
     expect(view).toMatchObject({ checked: false, approved: false, problem: "it isn't what Games released as 1.0" });
     await expect(martl.approveWidget({ message: sent.id })).rejects.toThrow(/won't run/);
+  });
+
+  it('unpacks a release file without a tar program: a component as it is, nothing outside its folder', () => {
+    const dir = tempDir('weave-widget-unpack-');
+    unpackPure(component, 'tally.wasm', dir);
+    expect(readFileSync(join(dir, 'tally.wasm')).length).toBe(component.length);
+    const other = tempDir('weave-widget-unpack-');
+    unpackPure(new Uint8Array([1, 2, 3]), '../../evil.wasm', other);
+    expect(existsSync(join(other, 'evil.wasm'))).toBe(false);
+    expect(existsSync(join(other, 'component.wasm'))).toBe(true);
   });
 
   it('refuses a release that isn’t a widget', async () => {

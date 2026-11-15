@@ -64,4 +64,6 @@ A widget is pure, like a lens:
 | `widgetAction({message, action, input?})` | `weave widget act <id> <action> [--input]` | `weave_widget_action` |
 | `approveWidget({message, off?})` | `weave widget approve <id> [--off]` | (none: approving is the person's own) |
 
+In Weave Web (docs/web-stage2.md, step 8) the component is transpiled in its Worker as it starts, and the view is built in a sandboxed frame of its own (`lens-frame.html`) from its files (`lensSite`).
+
 The app shows a widget message as its card or its frame (`apps/desktop/src/renderer/widgets.tsx`), and sends one from the chat's 📎 menu, entry "Mini-App", which lists the widget releases of the projects you're in. Its view is served like a lens's: `lensBase('widget-<release>')`.

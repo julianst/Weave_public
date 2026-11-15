@@ -3786,6 +3786,10 @@ export class WeaveNode implements Backend {
     return this.#lenses.lensFile(...args);
   }
 
+  lensSite(...args: Parameters<Lenses['lensSite']>): ReturnType<Lenses['lensSite']> {
+    return this.#lenses.lensSite(...args);
+  }
+
   /** A widget's view is served as a lens's is (lensFile), once you approved it. */
   #lensesSeeWidgets(widgets: Widgets): Widgets {
     this.#lenses.widgetSite = (release) => widgets.site(release);

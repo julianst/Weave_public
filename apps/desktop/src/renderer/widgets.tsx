@@ -22,7 +22,7 @@ function WidgetFrame({ view, meDid, height }: { view: WidgetViewInfo; meDid: str
   const message = useMemo(() => viewMessage(view, meDid), [view, meDid]);
   if (!view.site) return <pre className="sunken widget-state">{JSON.stringify(view.state, null, 2)}</pre>;
   if (!base) return <div className="widget-wait" style={{ height }} />;
-  return <LensFrame title={view.title} base={base} view={message} act={(name, input) => api('widgetAction', { message: view.id, action: name, input })} className="widget-frame" style={{ height }} />;
+  return <LensFrame title={view.title} release={view.view} base={base} view={message} act={(name, input) => api('widgetAction', { message: view.id, action: name, input })} className="widget-frame" style={{ height }} />;
 }
 
 /** A widget message's bubble: the approval card, or the widget itself (compact; large on click). */
