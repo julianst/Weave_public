@@ -9,7 +9,7 @@ import { lensSources } from '../../../packages/node/src/lenscsp.ts';
 export function lensFrameCspFor(net?: readonly string[]): string {
   const hosts = lensSources(net);
   const extra = hosts ? ` ${hosts}` : '';
-  return `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src data: blob:${extra}; font-src data: blob:; media-src data: blob:${extra}; connect-src ${hosts || "'none'"}; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`;
+  return `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline' blob:; img-src data: blob:${extra}; font-src data: blob:; media-src data: blob:${extra}; connect-src ${hosts || "'none'"}; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`;
 }
 
 /** The hosts a frame's address names (?net=a.example,b.example): host names only, at most 20. */
