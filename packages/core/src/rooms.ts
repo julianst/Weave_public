@@ -148,6 +148,11 @@ export interface AppClient {
   component: string;
   site?: string;
   writes: string[];
+  /**
+   * Hosts its site may load from over HTTPS (map tiles, weather), once each member said yes to exactly these. Its
+   * component never gets a network: it folds the same for everyone.
+   */
+  net?: string[];
 }
 
 /** The height a widget asks for in a chat, in CSS pixels: between these, and this one when it says none. */
@@ -162,6 +167,8 @@ export interface AppWidget {
   site?: string;
   writes: string[];
   size?: { height: number };
+  /** Hosts its site may load from over HTTPS, as a client service's (AppClient.net). */
+  net?: string[];
 }
 
 /** Where a WebAssembly service's parts are in its package: paths inside it, like "service.wasm" and "site". */
@@ -751,6 +758,22 @@ export function checkManifest(input: unknown): ManifestCheck {
     const type = text(raw.type, 100);
     file = type && /^[a-z]+\/[a-z0-9.+-]+$/i.test(type) ? { type: type.toLowerCase() } : {};
   }
+  /**
+   * A site's hosts ("client.net", "widget.net"): names only, no placeholders, at most 20. What its page may reach over
+   * HTTPS once a member allowed it; the component itself never reaches anything.
+   */
+  const siteNet = (raw: Record<string, unknown>, field: string): string[] | undefined => {
+    if (raw.net === undefined) return undefined;
+    const hosts = Array.isArray(raw.net) ? raw.net.map(lowerHost) : [];
+    const bad = Array.isArray(raw.net) ? hosts.filter((h) => !isNetHost(h) || String(h).includes('{')) : [raw.net];
+    if (!Array.isArray(raw.net) || bad.length) {
+      problems.push(`"${field}.net" lists the hosts its site loads from over HTTPS, by name: like ["api.open-meteo.com", "*.tile.openstreetmap.org"] (not ${bad.map((h) => JSON.stringify(h)).join(', ') || JSON.stringify(raw.net)})`);
+      return undefined;
+    }
+    if (hosts.length > 20) warnings.push(`only the first 20 hosts in "${field}.net" count`);
+    const unique = [...new Set(hosts as string[])].slice(0, 20);
+    return unique.length ? unique : undefined;
+  };
   // A client service: where its component and site are, and what its actions may write (the kinds members sign).
   let client: AppClient | undefined;
   if (m.client !== undefined) {
@@ -760,7 +783,11 @@ export function checkManifest(input: unknown): ManifestCheck {
     const writes = Array.isArray(raw.writes) ? [...new Set(raw.writes.filter((k): k is string => typeof k === 'string' && /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$/.test(k)))].slice(0, 20) : [];
     if (!component || !/\.wasm$/i.test(component)) problems.push('"client.component" is where its component is in the package, like "board.wasm"');
     else if (raw.site !== undefined && !site) problems.push('"client.site" is the folder of its renderer in the package, like "site"');
-    else client = { component, ...(site ? { site } : {}), writes };
+    else {
+      const net = siteNet(raw, 'client');
+      if (net && !site) problems.push('"client.net" is for its site: a client service without one ("client.site") loads nothing');
+      else client = { component, ...(site ? { site } : {}), writes, ...(net ? { net } : {}) };
+    }
   }
   // A group widget: as a client service, but its kinds are its own only (never Weave's), and it says its height.
   let widget: AppWidget | undefined;
@@ -778,7 +805,9 @@ export function checkManifest(input: unknown): ManifestCheck {
     else if (raw.size !== undefined && (!Number.isFinite(height) || height <= 0)) problems.push('"widget.size" says how tall it wants to be in a chat, in pixels: {"height": 320}');
     else {
       if (named.length !== writes.length) warnings.push('"widget.writes" lists kinds like "tiles.move": the others are left out');
-      widget = { component, ...(site ? { site } : {}), writes, ...(raw.size !== undefined ? { size: { height: Math.round(Math.min(WIDGET_HEIGHT.max, Math.max(WIDGET_HEIGHT.min, height))) } } : {}) };
+      const net = siteNet(raw, 'widget');
+      if (net && !site) problems.push('"widget.net" is for its site: a widget without one ("widget.site") loads nothing');
+      else widget = { component, ...(site ? { site } : {}), writes, ...(raw.size !== undefined ? { size: { height: Math.round(Math.min(WIDGET_HEIGHT.max, Math.max(WIDGET_HEIGHT.min, height))) } } : {}), ...(net ? { net } : {}) };
     }
   }
   // A mark service: where its component is, what it reads, and where it answers.
@@ -914,8 +943,8 @@ export const MANIFEST_RULES = [
   'wasm: a WebAssembly service (packages/sdk/wit/service.wit), which Weave runs itself with nothing installed, no Docker: {"component": "service.wasm", "site": "site"}, paths in its package. Its image is built for wasi/wasm (docker buildx --platform wasi/wasm, FROM scratch, the component and its site copied in), or its release file is for the platform "wasm" (weave app release --asset wasm=<file>). A website (the website world) has "site": Weave serves those files and holds its players\' connections.',
   'keyvault and fetcher: client apps a person adds for themselves (Keys & devices), from Weave or from any project\'s release, approved once and pinned to what was released; WebAssembly components, run sandboxed. A keyvault ({"platform": "acme", "net": ["api.acme.example"], "resources": "buckets"}, world keyvault) holds its person\'s access to a platform and mints services only what their contracts declare ("uses") for what its person handed each project; a fetcher ({"net": [...]}, world fetcher) fetches release files a provider grants.',
   'lists: what a service hands out, shown by Weave the same way in every card, however it runs (WebAssembly, a container, a program), whoever made it (search, pages, each button only for who may): its lists come first, before any page of its own. Each names the action that answers its items, + (add: an action, or {"hand": "github"}: whoever runs it hands one from their keyvault), the trash can (remove: an action, given {id}) and each item’s main button (use: an action and a label, or {"account": "github", "label": "Get access"}), and "covers" for other actions its items offer: [{"name": "repos", "title": "Repositories", "item": "access offer", "list": "offers", "add": {"hand": "github"}, "remove": {"action": "decline"}, "use": {"account": "github", "label": "Get access"}}]. Its list action answers [{id, icon?, title, badge?, detail?, url?, done? (said instead of the main button: "✓ You have access"), use?: false, remove?: false, more?: [{action, label, icon?, confirm?}]}], or, for a long list it pages itself, {items, next}, asked again with {query, cursor}. A page of its own (wasm.panels) only for what isn’t a list: a form of several steps, a live view.',
-  'client: a client service, which shows a board its own way (the board world of packages/sdk/wit/service.wit; a starter: weave service new <folder> --lens): {"component": "board.wasm", "site": "site", "writes": ["weave.post", "kanban.move"]}. Released like wasm (an image for wasi/wasm, or a release file for "wasm"); a project\'s maintainers pin it to a board (weave board lens), and every member\'s Weave runs it with no key and no network. "writes": the kinds its actions may propose, which members sign: of Weave\'s own only posts and what members do with posts; kinds of its own name a post in the board ("target").',
-  'widget: a group widget, a mini-app anyone in a chat sends into it (the board world too; docs/group-widgets.md): {"component": "board.wasm", "site": "site", "writes": ["tiles.move"], "size": {"height": 360}}. Released like a client service, and one release may be both. Each message that sends it (weave.widget) is one instance; every member’s Weave runs it, once they approved the release, with no key, no network, no clock and no randomness: it folds its instance’s events and its actions propose events the member signs. "writes": kinds of its own only, never Weave’s, each about its instance ("target": the message). "size": its height in the chat, in pixels (120 to 720; 320 when left out).',
+  'client: a client service, which shows a board its own way (the board world of packages/sdk/wit/service.wit; a starter: weave service new <folder> --lens): {"component": "board.wasm", "site": "site", "writes": ["weave.post", "kanban.move"]}. Released like wasm (an image for wasi/wasm, or a release file for "wasm"); a project\'s maintainers pin it to a board (weave board lens), and every member\'s Weave runs it with no key and no network. "net": hosts its site (not its component) may load from over HTTPS, like ["api.open-meteo.com", "*.tile.openstreetmap.org"], once each member allowed exactly these; without it, its site reaches nothing. "writes": the kinds its actions may propose, which members sign: of Weave\'s own only posts and what members do with posts; kinds of its own name a post in the board ("target").',
+  'widget: a group widget, a mini-app anyone in a chat sends into it (the board world too; docs/group-widgets.md): {"component": "board.wasm", "site": "site", "writes": ["tiles.move"], "size": {"height": 360}}. Released like a client service, and one release may be both. Each message that sends it (weave.widget) is one instance; every member’s Weave runs it, once they approved the release, with no key, no network, no clock and no randomness: it folds its instance’s events and its actions propose events the member signs. "net": hosts its site may load from over HTTPS, as for a client service. "writes": kinds of its own only, never Weave’s, each about its instance ("target": the message). "size": its height in the chat, in pixels (120 to 720; 320 when left out).',
   'marks: a mark service, which shows marks next to names (the marks world of packages/sdk/wit/service.wit; a starter: weave service new <folder> --marks): {"component": "marks.wasm", "reads": ["weave.badge"], "slots": ["author", "member", "chat", "profile"], "subjects": ["did"]}. Released like wasm. You take it into your own domain (weave marks add), shown everywhere you look; or a space\'s maintainers pin it (weave marks add --space), shown in that space only. Every node that took it in runs it with no key and no network. "reads": the kinds it folds. It answers with check, label, count, symbol or image, and Weave shows who says so.',
   'hints: a hint service, which shows numbers about its person\'s own state next to places, like unread counts (the marks world too): {"component": "hints.wasm", "reads": ["weave.notice", "weave.seen"], "slots": ["place"], "subjects": ["space", "board", "channel"]}. Released like wasm; its person takes it in (weave hints add) and its counts show in their Places. It folds what their node holds of the kinds it reads, what\'s sealed to them too, and the notices their node works out (weave.notice), with no key and no network. It answers with a count, never a claim about anyone.',
   'install.steps: how to install it by hand, for agents (from a checkout). install.source, tag and assets are added when a release is published (weave app release, through the project\'s provider): don\'t write them.',

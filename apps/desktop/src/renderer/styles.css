@@ -108,6 +108,11 @@ button .icon { vertical-align: -3px; }
 .pane-main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 /* A board's client service's own view (lens.tsx): it fills the pane. */
 .lens-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+/* What a lens's site loads from (its "net"): asked once, then said in a line above it. */
+.lens-net { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; flex: none; padding: 3px 8px; font-size: 11px; border-bottom: 1px solid var(--shadow, #808080); }
+.lens-net.ask { background: var(--face); padding: 6px 8px; }
+.lens-net span { display: inline-flex; align-items: center; gap: 4px; }
+.lens-net button { margin-left: auto; }
 .pane-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 2px; }
 .page { padding: 10px 12px; font-family: var(--content-font); font-size: 12px; }
 .page fieldset { margin-bottom: 10px; background: var(--face); }

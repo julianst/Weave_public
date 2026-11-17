@@ -891,6 +891,8 @@ export interface WidgetViewInfo {
   approved: boolean;
   /** How tall it wants to be in a chat, in pixels. */
   height: number;
+  /** The hosts its site loads from over HTTPS (its manifest's "net"): approving the release allows them. */
+  net?: string[];
   /** Its view's files: lensFile({release: view, path}), in a sandboxed frame (LENS_CSP); site says it has one. */
   view: string;
   site?: true;
@@ -913,10 +915,19 @@ export interface WidgetReleaseInfo {
   approved: boolean;
 }
 
+/**
+ * The hosts a view's site asks to load from over HTTPS (its manifest's "net"), and whether this member allowed
+ * exactly these: a lens asks its own question (allowLensNet); a widget's come with approving its release.
+ */
+export interface LensNetInfo {
+  hosts: string[];
+  allowed: boolean;
+}
+
 export interface BoardViewInfo {
   space: { id: string; kind: string; name: string };
   board: { name: string; title: string };
-  lens?: { name: string; tag: string; mode: 'suggest' | 'require'; release: string; by: Actor; site?: boolean; problem?: string };
+  lens?: { name: string; tag: string; mode: 'suggest' | 'require'; release: string; by: Actor; site?: boolean; problem?: string; net?: LensNetInfo };
   state?: Json;
   actions?: Json[];
 }
@@ -2493,7 +2504,14 @@ export interface Backend {
    * A file of a board's client service's view (its site), for the app to show in a sandboxed frame (LENS_CSP): the
    * desktop, the phone and the web preview each serve it their own way. Only of lenses pinned to a board you're in.
    */
-  lensFile(input: { release: string; path: string }): Promise<{ type: string; data: string }>;
+  lensFile(input: { release: string; path: string }): Promise<{ type: string; data: string; net?: string[] }>;
+  /**
+   * The hosts a view's site may load from here (lensFile's net: what its manifest names and this member allowed), and
+   * what it asks for. Weave Web's frame takes its CSP from this.
+   */
+  lensNet(input: { release: string }): Promise<LensNetInfo>;
+  /** Allow a board's lens's site to load from the hosts its manifest names (or, off, no longer): on this node, for that app of that project, as long as it asks for no other hosts. */
+  allowLensNet(input: { release: string; off?: boolean }): Promise<LensNetInfo>;
   /** All of a view's files at once (each as lensFile gives it): for Weave Web, whose sandboxed frame builds the view's page from them. */
   lensSite(input: { release: string }): Promise<Array<{ path: string; type: string; data: string }>>;
 
@@ -2791,14 +2809,14 @@ export interface Backend {
 /** Backend methods callable over the daemon's API (watch is a separate event stream). */
 export type RpcMethod = Exclude<keyof Backend, 'watch'>;
 
-export { LENS_CSP } from './lenscsp.ts';
+export { LENS_CSP, lensCsp } from './lenscsp.ts';
 
 export const RPC_METHODS: readonly RpcMethod[] = [
   'whoami', 'publish', 'feed', 'addAgent', 'addNodeAgent', 'agentToken', 'updateAgent', 'join', 'status',
   'spaces', 'createGroup', 'createProject', 'invite', 'joinSpace', 'lookAtInvite', 'createOnboardLink', 'onboardLinks', 'revokeOnboardLink', 'lookAtOnboardLink', 'followOnboardLink', 'playLinks', 'removePlayLink', 'pairPhone', 'phones', 'unpairPhone', 'setHomeVisibility', 'followBoard', 'leave', 'handOver', 'closeSpace', 'setHistory', 'setBoardRule', 'keepPost', 'fading', 'shred', 'fetchOlder', 'keepers', 'letCopiesGo', 'dropKept', 'manageSpace', 'unlockSpace', 'destroyCompanyKey', 'signIn', 'setHold', 'approveAgent', 'setVisitors', 'agentBlocked', 'escrowRecovery', 'openEscrow', 'createCompany', 'company', 'companyAction', 'enrollLink', 'inviteByEmail', 'link', 'links', 'setScim', 'scim', 'setConsole', 'consoleInfo', 'companySignIn', 'signInStatus', 'consoleOperatorLink', 'backup', 'saveBackup', 'keystores', 'moveHomeKey', 'linkNode', 'linkBrowser', 'addAuditStream', 'removeAuditStream', 'auditStreams', 'exportSpace', 'audit', 'knocks', 'answerKnock', 'setBoardAccess', 'members', 'removeMember',
   'addService', 'artifacts', 'catalog', 'catalogArtifact', 'listInCatalog', 'unlistFromCatalog', 'openWebsite', 'services', 'setService', 'removeService', 'serviceProfiles', 'servicesIn', 'shippedServices', 'serviceActions', 'servicePanels', 'serviceLists', 'setServicePolicy', 'setArtifactAccess', 'withdrawArtifact', 'launchWebsite', 'programConsents', 'withdrawProgramConsent', 'releaseFile', 'getArtifactFile', 'artifactFileJob', 'fetchers', 'addFetcher', 'setFetcher', 'removeFetcher', 'keyvaults', 'addKeyvault', 'removeKeyvault', 'addClientApp', 'removeClientApp', 'setupPacks', 'startKeyvaultApp', 'keyvaultOwners', 'finishKeyvaultApp', 'keyvaultReachable', 'removeKeyvaultApp', 'handKeyvault', 'serviceSettings', 'setServiceSetting', 'startServiceSignIn', 'finishServiceSignIn', 'askService', 'serviceRequests', 'platforms', 'accountProof', 'linkAccount', 'startAccountProof', 'finishAccountProof', 'accounts', 'myAccounts',
   'createCommunity', 'community', 'setCommunity', 'setModerator',
-  'posts', 'post', 'submit', 'confirmCoauthor', 'coauthorRequests', 'editPost', 'deletePost', 'upvote', 'save', 'share', 'boards', 'setBoard', 'curate', 'setBoardLens', 'boardView', 'boardAction', 'lensFile', 'lensSite', 'widgetReleases', 'sendWidget', 'widgetView', 'widgetAction', 'approveWidget',
+  'posts', 'post', 'submit', 'confirmCoauthor', 'coauthorRequests', 'editPost', 'deletePost', 'upvote', 'save', 'share', 'boards', 'setBoard', 'curate', 'setBoardLens', 'boardView', 'boardAction', 'lensFile', 'lensSite', 'lensNet', 'allowLensNet', 'widgetReleases', 'sendWidget', 'widgetView', 'widgetAction', 'approveWidget',
   'project', 'setProjectPage', 'putBlob', 'putFile', 'blob', 'setMaintainer', 'inviteGroup', 'uninviteGroup', 'setRule', 'admissions', 'admit', 'decline',
   'setEdge', 'social', 'profile', 'setProfile', 'imprint', 'setImprint', 'avatars', 'setSpacePhoto', 'setSessionAvatar', 'directory', 'find', 'contactLink', 'addContact',
   'identityInfo', 'keys', 'revokeKey', 'rotateRoot', 'harnesses', 'connectHarness', 'dismissHarnesses', 'requestPermission', 'requestHand', 'permissionRequests', 'answerPermission', 'openInApp',

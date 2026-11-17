@@ -44,6 +44,21 @@ In a group anyone can send a widget, so nothing of it runs before its member sai
 - **Checked against its project** where the member can: someone in the release's project sees whether the manifest sent is what the project released; if it isn't, it never runs, approved or not. Someone outside the project sees "only the sender vouches for this version".
 - Fetching: a release from Weave's own files (blobs) is fetched from whoever holds them, so members outside its project can get it; a release only a provider hands out (GitHub releases) needs membership in its project, as before.
 
+## A network for its site
+
+A lens's or a widget's component never reaches anything: it has to fold the same for every member. Its site (the page in the sandboxed frame) may, when its manifest names the hosts and its member allowed them (proposal 3M1CwPDL):
+
+```json
+"client": { "component": "board.wasm", "site": "site", "writes": ["woods.find"], "net": ["api.open-meteo.com", "*.tile.openstreetmap.org"] }
+```
+
+- **`net`** in `client` or `widget`: host names only (`*.domain` for its subdomains), no addresses, no localhost, no placeholders, at most 20; only with a `site`. Without it, nothing changes.
+- **The CSP** of its frame (`lensCsp(net)` on a computer and a phone, `functions/lens-frame.ts` on Weave Web) allows `connect-src`, `img-src` and `media-src` to exactly those hosts over HTTPS, and nothing else: still sandboxed, no forms, no other origins.
+- **A widget's** hosts are allowed by approving its release: the approval card names them, and a new release asks again anyway.
+- **A lens's** are asked for once by each member (`allowLensNet`), above the board: "Woods wants to load data from …", with Allow. Kept on the member's node (`lens-net.json`) by its project and app, so a new version asking for the same hosts (or fewer) keeps it, and one asking for another host asks again. Until then, and after `allowLensNet {off: true}`, its frame reaches nothing; a line above it says where it loads from while it does.
+- **Weave Web** has no node to serve the frame from: its address names the hosts (`/lens-frame?net=…`), and the page hands the frame its files only if the hosts it reports are the ones allowed. A view that sends its frame to another address gets nothing.
+- What it can't stop: a site may put what it shows into the addresses it asks those hosts for. The member's yes to exactly these hosts is the protection, so name only what the site needs.
+
 ## Limits
 
 A widget is pure, like a lens:
@@ -51,7 +66,7 @@ A widget is pure, like a lens:
 - **No secrets.** Everything in an instance is readable by every member of the chat: its events and its state. A card game with hidden hands can't be built this way.
 - **No randomness.** fold must give every member the same state from the same events. Seed what needs chance from something nobody knows in advance and everyone sees, like the widget message's id (Word Tiles shuffles its bag from it).
 - **No clock.** Events are dated by their signers; fold orders by that date and the id, and a move whose turn hasn't come yet should wait rather than count (see Word Tiles' `n`).
-- No key, no network, no calls to anything: fold and act only.
+- No key, no network, no calls to anything: fold and act only. Its site may get a network of its own (below).
 - At most 5000 events per instance are folded, and a state of at most 1 MB.
 
 ## API

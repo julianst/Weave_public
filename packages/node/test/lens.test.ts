@@ -32,6 +32,8 @@ const manifest = JSON.parse(readFileSync(join(STARTER, 'weave.app.json'), 'utf8'
 
 /** The starter's image: its component and its site in one layer. */
 let fetchImpl: Fetch;
+/** The starter again, asking for a network for its site, in several versions (its own registry: a test swaps fetchImpl). */
+let netImages: Fetch;
 beforeAll(async () => {
   const component = await buildComponent(join(STARTER, 'src', 'board.js'), 'board');
   const dir = tempDir('weave-lens-image-');
@@ -40,7 +42,15 @@ beforeAll(async () => {
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
   const out = join(tempDir('weave-lens-layer-'), 'layer.tar.gz');
   if (spawnSync(tar, ['-czf', out, '-C', dir, '.']).status !== 0) throw new Error('tar failed');
+  // The same, asking for a network for its site ("net"): one host, then one more.
+  const withNet = (net: string[]) => JSON.stringify({ ...manifest, client: { ...(manifest.client as object), net } });
   fetchImpl = registry({ 'kanban:1.0': { labels: { [SERVICE_LABEL]: JSON.stringify(manifest) }, wasm: readFileSync(out) } });
+  netImages = registry({
+    'kanban:1.0': { labels: { [SERVICE_LABEL]: JSON.stringify(manifest) }, wasm: readFileSync(out) },
+    'kanban:2.0': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com']) }, wasm: readFileSync(out) },
+    'kanban:2.1': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com']) }, wasm: readFileSync(out) },
+    'kanban:3.0': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com', '*.tile.openstreetmap.org']) }, wasm: readFileSync(out) },
+  });
 }, 180_000);
 
 function person(name: string): WeaveNode {
@@ -146,6 +156,50 @@ describe('client services', { timeout: 120_000 }, () => {
     await expect(act('half')).rejects.toThrow(/may not propose evil.other/);
     await expect(act('junk')).rejects.toThrow(/isn't JSON/);
     expect(count()).toBe(before);
+  });
+
+  it('lets a site reach the hosts it names only once its member allowed exactly those', async () => {
+    const martl = person('martl');
+    const ola = person('Ola');
+    for (const node of [martl, ola]) node.containerSetup = { ...node.containerSetup, fetch: netImages };
+    await martl.createProject({ name: 'Woods' });
+    await martl.setBoard({ project: 'Woods', name: 'finds', title: 'Finds' });
+    await ola.joinSpace(await martl.invite('Woods'));
+    const pin = async (tag: string) => {
+      await martl.releaseService({ project: 'Woods', image: `ghcr.io/martl/kanban:${tag}` });
+      await martl.setBoardLens({ space: 'Woods', board: 'finds', from: { project: 'Woods', tag }, mode: 'require' });
+      sync([martl, ola]);
+      return (await ola.boardView({ space: 'Woods', board: 'finds' })).lens!;
+    };
+
+    // Asked for, not allowed: its files come without hosts, so its frame reaches nothing.
+    let lens = await pin('2.0');
+    expect(lens.net).toEqual({ hosts: ['api.open-meteo.com'], allowed: false });
+    expect(await ola.lensFile({ release: lens.release, path: '' })).not.toHaveProperty('net');
+    expect(await ola.lensNet({ release: lens.release })).toEqual({ hosts: ['api.open-meteo.com'], allowed: false });
+
+    // Allowed by Ola, on Ola's node only.
+    expect(await ola.allowLensNet({ release: lens.release })).toEqual({ hosts: ['api.open-meteo.com'], allowed: true });
+    expect((await ola.lensFile({ release: lens.release, path: '' })).net).toEqual(['api.open-meteo.com']);
+    expect((await martl.boardView({ space: 'Woods', board: 'finds' })).lens!.net!.allowed).toBe(false);
+
+    // A new version asking for the same hosts keeps the yes; one asking for one more asks again.
+    lens = await pin('2.1');
+    expect(lens.net!.allowed).toBe(true);
+    lens = await pin('3.0');
+    expect(lens.net).toEqual({ hosts: ['api.open-meteo.com', '*.tile.openstreetmap.org'], allowed: false });
+    expect(await ola.lensFile({ release: lens.release, path: '' })).not.toHaveProperty('net');
+
+    // Taken back.
+    await ola.allowLensNet({ release: lens.release });
+    expect((await ola.lensFile({ release: lens.release, path: '' })).net).toEqual(['api.open-meteo.com', '*.tile.openstreetmap.org']);
+    expect((await ola.allowLensNet({ release: lens.release, off: true })).allowed).toBe(false);
+    expect(await ola.lensFile({ release: lens.release, path: '' })).not.toHaveProperty('net');
+
+    // A lens without a network has nothing to allow.
+    lens = await pin('1.0');
+    expect(lens).not.toHaveProperty('net');
+    await expect(ola.allowLensNet({ release: lens.release })).rejects.toThrow(/nothing to allow/);
   });
 
   it('refuses a release that isn’t a client service', async () => {

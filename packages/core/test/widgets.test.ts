@@ -54,6 +54,17 @@ describe('the widget manifest', () => {
     expect(alone.manifest!.widget!.size).toBeUndefined();
   });
 
+  it('reads the hosts a site may load from, by name only, and only with a site', () => {
+    const ok = checkManifest({ app: 'woods', name: 'Woods', client: { component: 'b.wasm', site: 'site', writes: [], net: ['API.open-meteo.com', '*.tile.openstreetmap.org', 'api.open-meteo.com'] }, widget: { component: 'b.wasm', site: 'site', writes: ['woods.find'], net: ['api.open-meteo.com'] } });
+    expect(ok.problems).toEqual([]);
+    expect(ok.manifest!.client!.net).toEqual(['api.open-meteo.com', '*.tile.openstreetmap.org']);
+    expect(ok.manifest!.widget!.net).toEqual(['api.open-meteo.com']);
+    expect(checkManifest({ app: 'w', name: 'W', client: { component: 'b.wasm', site: 'site', writes: [], net: [] } }).manifest!.client).not.toHaveProperty('net');
+    for (const bad of [['localhost'], ['127.0.0.1'], ['{BUCKET}.s3.amazonaws.com'], ['https://api.example.com'], 'api.example.com'])
+      expect(checkManifest({ app: 'w', name: 'W', client: { component: 'b.wasm', site: 'site', writes: [], net: bad } }).problems.join()).toMatch(/client.net/);
+    expect(checkManifest({ app: 'w', name: 'W', widget: { component: 'b.wasm', writes: [], net: ['api.example.com'] } }).problems.join()).toMatch(/widget.net" is for its site/);
+  });
+
   it("refuses Weave's own kinds, a missing component and a height that isn't one", () => {
     expect(checkManifest({ app: 'x', name: 'X', widget: { component: 'x.wasm', writes: ['weave.post', 'x.move'] } }).problems.join()).toMatch(/never Weave's \(not weave.post\)/);
     expect(checkManifest({ app: 'x', name: 'X', widget: { site: 'site', writes: [] } }).problems.join()).toMatch(/widget.component/);
