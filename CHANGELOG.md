@@ -2,6 +2,18 @@
 
 Every release of Weave, newest first. Versions follow semantic versioning; while it is 0.x, any minor release may change the protocol.
 
+## v0.34.0 · 2026-11-17
+
+- Lens views may start workers from blob: URLs, as a map renderer (MapLibre) does
+- Lenses and widgets with a network for their site: only the hosts they name, once their member allowed them (3M1CwPDL)
+- Release: the Microsoft Store package built and submitted to Partner Center
+- Weave Web: the lens frame at /lens-frame, with its own CSP there
+- Recovery words in columns everywhere, by the room the box has
+- Phones: recovery words in columns, read down (1-6, 7-12, ...)
+- Lenses and group widgets in Weave Web
+- Group widgets: mini-apps sent into a chat, one instance per message
+- Notification settings, tidied for a phone: push first with its state, each kind its name then what it covers, rules in a box of their own, hint services folded away; no desktop-only lines on the web (OVb4TP5x)
+
 ## v0.33.0 · 2026-11-14
 
 - README: keys at rest are sealed with a home key the OS keystore (or TPM, Secure Enclave, YubiKey) holds, not unencrypted; the installers bring the daemon
