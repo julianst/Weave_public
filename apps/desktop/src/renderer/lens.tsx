@@ -18,6 +18,8 @@ import { useTexts } from './texts.tsx';
  *                                                                  (net: the hosts in its own address, which its CSP took)
  *   to the frame    {weave: 'files', files: [{path, type, data}]}  (apps/web/src/lens-frame.html)
  *   from the frame  {weave: 'fullscreen', on?}                      fill the screen with the view (on: false, leave it)
+ *   to the frame    {weave: 'fullscreen', on, corner}               it fills the screen (or no longer); corner: the
+ *                                                                  square at its top right (px) Weave's ✕ sits in
  *   from the frame  {weave: 'locate', id}                           where am I? (only if its member allowed it)
  *   to the frame    {weave: 'location', id, lat, lon, accuracy, rough} / {weave: 'location', id, error}
  *                                                                  Weave asks the device, never the frame; rough is
@@ -77,7 +79,7 @@ function locate(level: LensLocation): Promise<{ lat: number; lon: number; accura
   });
 }
 
-export function LensFrame({ title, release, base, net, location, onLocated, onFullscreen, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; location?: LensLocation; onLocated?(): void; onFullscreen?(on: boolean): void; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
+export function LensFrame({ title, release, base, net, location, onLocated, onFullscreen, full, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; location?: LensLocation; onLocated?(): void; onFullscreen?(on: boolean): void; full?: boolean; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
   const { t } = useTexts();
   const frame = useRef<HTMLIFrameElement>(null);
   // Weave Web's frame takes its CSP from its address (a Pages Function): the hosts this member allowed, or none. On a
@@ -89,6 +91,8 @@ export function LensFrame({ title, release, base, net, location, onLocated, onFu
   const send = (message: unknown) => frame.current?.contentWindow?.postMessage(message, '*');
   const sendView = () => send(latest.current.view);
   useEffect(sendView, [view]);
+  // The view hears when it fills the screen, and where Weave's ✕ is then, so it keeps that corner free.
+  useEffect(() => send({ weave: 'fullscreen', on: !!full, corner: 40 }), [full]);
 
   useEffect(() => {
     const listen = (event: MessageEvent) => {
@@ -261,7 +265,7 @@ export function LensView({ space, board, meDid, onOpen, full = false, setFull = 
         </div>
       )}
       {/* A new key when the hosts change: the frame loads again with the CSP that goes with them. */}
-      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} location={where?.allowed ? where.asks : undefined} onFullscreen={setFull} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
+      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} location={where?.allowed ? where.asks : undefined} onFullscreen={setFull} full={full} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
     </div>
   );
 }
