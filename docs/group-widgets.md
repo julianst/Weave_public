@@ -42,7 +42,7 @@ In a group anyone can send a widget, so nothing of it runs before its member sai
 - **Kept on the member's node** (`widgets.json` in its home), never shared or published. `approveWidget {off: true}` takes it back.
 - **Until approved**, the bubble shows a card: the title, the app's name and tag, the project it comes from, who sent it, and a button to approve and open it. Nothing is fetched, nothing runs, its view isn't served (`lensFile` refuses `widget-<release>`), and `widgetAction` refuses.
 - **Checked against its project** where the member can: someone in the release's project sees whether the manifest sent is what the project released; if it isn't, it never runs, approved or not. Someone outside the project sees "only the sender vouches for this version".
-- Fetching: a release from Weave's own files (blobs) is fetched from whoever holds them, so members outside its project can get it; a release only a provider hands out (GitHub releases) needs membership in its project, as before.
+- Fetching: a release from Weave's own files (blobs) is fetched from whoever holds them, so members outside its project can get it; a release only a provider hands out (GitHub releases) needs membership in its project, as before. Once a member's computer fetched such a release, it keeps it as blobs for the project (a mirror), so members whose own way to the provider fails, Weave Web among them, get it from those.
 
 ## A network for its site
 

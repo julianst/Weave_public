@@ -535,3 +535,4 @@ export {
   type TextValues,
 } from './texts.ts';
 export { newPlanSecret, onboardLink, ONBOARD_PATH, openPlan, parseOnboardLink, parsePlan, planCheck, playManifest, playTags, previewTags, sealPlan, type PlayApp, type OnboardPlan, type OnboardStep } from './onboard.ts';
+export { KIND_ARTIFACT_MIRROR, mirrorsOf, parseArtifactMirror, type ArtifactMirror } from './mirrors.ts';
