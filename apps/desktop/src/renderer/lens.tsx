@@ -157,6 +157,7 @@ function useFullscreen(box: { current: HTMLElement | null }, full: boolean, setF
     const native = typeof el.requestFullscreen === 'function' && document.fullscreenEnabled;
     if (full && native && document.fullscreenElement !== el) el.requestFullscreen().catch(() => el.classList.add('lens-full'));
     else if (full && !native) el.classList.add('lens-full');
+    document.documentElement.classList.toggle('lens-full-on', full);
     if (!full) {
       el.classList.remove('lens-full');
       if (document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
@@ -221,8 +222,8 @@ export function LensView({ space, board, meDid, onOpen, full = false, setFull = 
   return (
     <div className="lens-box" ref={box}>
       {full && (
-        <button className="lens-full-exit" onClick={() => setFull(false)}>
-          {t('lens.fullscreen.exit')}
+        <button className="lens-full-exit" onClick={() => setFull(false)} title={t('lens.fullscreen.exit')} aria-label={t('lens.fullscreen.exit')}>
+          ✕
         </button>
       )}
       {net && !net.allowed && (
