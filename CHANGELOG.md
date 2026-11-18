@@ -2,6 +2,10 @@
 
 Every release of Weave, newest first. Versions follow semantic versioning; while it is 0.x, any minor release may change the protocol.
 
+## v0.35.1 · 2026-11-18
+
+- Releases from GitHub in a page: a member's computer that fetched one for a lens or widget keeps it as blobs and says so (weave.artifact.mirror); where the provider's way fails (Weave Web reaches no GitHub download), a node puts it together from those blobs, checked against the release
+
 ## v0.35.0 · 2026-11-18
 
 - Lenses fill the screen: a Full screen button in the pane's head (and {weave: 'fullscreen'} from the view), the browser's full screen where a page may have it, laid over the app on an iPhone; Esc or the button at the top leaves it
