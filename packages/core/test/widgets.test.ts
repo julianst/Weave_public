@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  locationCovers,
+  roughLocation,
   artifactKindOf,
   boardOfEvents,
   channelsOf,
@@ -63,6 +65,22 @@ describe('the widget manifest', () => {
     for (const bad of [['localhost'], ['127.0.0.1'], ['{BUCKET}.s3.amazonaws.com'], ['https://api.example.com'], 'api.example.com'])
       expect(checkManifest({ app: 'w', name: 'W', client: { component: 'b.wasm', site: 'site', writes: [], net: bad } }).problems.join()).toMatch(/client.net/);
     expect(checkManifest({ app: 'w', name: 'W', widget: { component: 'b.wasm', writes: [], net: ['api.example.com'] } }).problems.join()).toMatch(/widget.net" is for its site/);
+  });
+
+  it('reads how closely a site may know where its member is, only with a site', () => {
+    const ok = checkManifest({ app: 'woods', name: 'Woods', client: { component: 'b.wasm', site: 'site', writes: [], location: 'rough' }, widget: { component: 'b.wasm', site: 'site', writes: ['woods.find'], location: 'exact' } });
+    expect(ok.problems).toEqual([]);
+    expect(ok.manifest!.client!.location).toBe('rough');
+    expect(ok.manifest!.widget!.location).toBe('exact');
+    expect(checkManifest({ app: 'w', name: 'W', client: { component: 'b.wasm', site: 'site', writes: [], location: 'near' } }).problems.join()).toMatch(/client.location/);
+    expect(checkManifest({ app: 'w', name: 'W', widget: { component: 'b.wasm', writes: [], location: 'rough' } }).problems.join()).toMatch(/widget.location" is for its site/);
+  });
+
+  it('makes a place rough: the middle of its 0.01° cell, the same for every place in it', () => {
+    expect(roughLocation(48.3412, 10.7356)).toEqual({ lat: 48.345, lon: 10.735 });
+    expect(roughLocation(48.3488, 10.7301)).toEqual({ lat: 48.345, lon: 10.735 });
+    expect(roughLocation(-33.8688, 151.2093)).toEqual({ lat: -33.865, lon: 151.205 });
+    expect([locationCovers('exact', 'rough'), locationCovers('rough', 'rough'), locationCovers('rough', 'exact'), locationCovers(undefined, 'rough')]).toEqual([true, true, false, false]);
   });
 
   it("refuses Weave's own kinds, a missing component and a height that isn't one", () => {

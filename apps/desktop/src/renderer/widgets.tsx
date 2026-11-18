@@ -22,8 +22,8 @@ function WidgetFrame({ view, meDid, height }: { view: WidgetViewInfo; meDid: str
   const message = useMemo(() => viewMessage(view, meDid), [view, meDid]);
   if (!view.site) return <pre className="sunken widget-state">{JSON.stringify(view.state, null, 2)}</pre>;
   if (!base) return <div className="widget-wait" style={{ height }} />;
-  // Approving its release allowed its hosts too: the approval card named them.
-  return <LensFrame title={view.title} release={view.view} base={base} net={view.net} view={message} act={(name, input) => api('widgetAction', { message: view.id, action: name, input })} className="widget-frame" style={{ height }} />;
+  // Approving its release allowed its hosts too, and knowing where you are: the approval card named them.
+  return <LensFrame title={view.title} release={view.view} base={base} net={view.net} location={view.location} view={message} act={(name, input) => api('widgetAction', { message: view.id, action: name, input })} className="widget-frame" style={{ height }} />;
 }
 
 /** A widget message's bubble: the approval card, or the widget itself (compact; large on click). */
@@ -77,6 +77,7 @@ export function WidgetMessage({ m, meDid }: { m: MessageInfo; meDid: string }) {
         {!view.checked && <p className="muted">{t('widget.unchecked')}</p>}
         <p className="muted">{t('widget.approve.why')}</p>
         {view.net?.length ? <p>{t('widget.approve.net', { hosts: view.net.join(', ') })}</p> : null}
+        {view.location ? <p>{t(view.location === 'exact' ? 'widget.approve.location.exact' : 'widget.approve.location')}</p> : null}
         <button onClick={() => void approve()}>{t('widget.approve.open')}</button>
       </div>
     );

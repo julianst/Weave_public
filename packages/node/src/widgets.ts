@@ -174,6 +174,7 @@ export class Widgets {
       approved,
       height: widget.height,
       ...(widget.manifest.widget?.net?.length ? { net: widget.manifest.widget.net } : {}),
+      ...(widget.manifest.widget?.location ? { location: widget.manifest.widget.location } : {}),
       view: `widget-${widget.app.release}`,
       ...(check.problem ? { problem: check.problem } : {}),
     };

@@ -59,6 +59,19 @@ A lens's or a widget's component never reaches anything: it has to fold the same
 - **Weave Web** has no node to serve the frame from: its address names the hosts (`/lens-frame?net=…`), and the page hands the frame its files only if the hosts it reports are the ones allowed. A view that sends its frame to another address gets nothing.
 - What it can't stop: a site may put what it shows into the addresses it asks those hosts for. The member's yes to exactly these hosts is the protection, so name only what the site needs.
 
+## Where its member is
+
+A lens's or widget's site may ask where its member is, when its manifest says how closely (proposal LDtj6H_4):
+
+```json
+"client": { "component": "board.wasm", "site": "site", "writes": ["woods.find"], "location": "rough" }
+```
+
+- **`location`** in `client` or `widget`: `"rough"` (the middle of a cell of 0.01°, about 1 km: `roughLocation` in core, the same answer for every place in the cell, so asking again doesn't narrow it down) or `"exact"` (what the device says). Only with a `site`.
+- **Allowed like `net`:** a lens asks once (`allowLensLocation`, kept in `lens-location.json` on the member's node by project and app; a new version asking the same or rougher keeps it, one asking for exact after rough asks again); a widget by approving its release (the approval card says so). A line above the lens says it may know.
+- **Weave asks, not the frame:** the frame posts `{weave: 'locate', id}`; the host (`apps/desktop/src/renderer/lens.tsx`, on a computer, a phone and Weave Web alike) asks the device, rounds it, and answers `{weave: 'location', id, lat, lon, accuracy, rough}` or `{weave: 'location', id, error}`. The sandboxed frame never has geolocation; the component never gets a place, and nothing is published unless the member's own action puts it there.
+- A site with `net` could send the place to its hosts: its member allows both with both in view.
+
 ## Limits
 
 A widget is pure, like a lens:

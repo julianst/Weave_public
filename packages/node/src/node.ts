@@ -3794,6 +3794,10 @@ export class WeaveNode implements Backend {
     return this.#lenses.allowLensNet(...args);
   }
 
+  allowLensLocation(...args: Parameters<Lenses['allowLensLocation']>): ReturnType<Lenses['allowLensLocation']> {
+    return this.#lenses.allowLensLocation(...args);
+  }
+
   lensSite(...args: Parameters<Lenses['lensSite']>): ReturnType<Lenses['lensSite']> {
     return this.#lenses.lensSite(...args);
   }

@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join as joinPath, resolve as resolvePath, sep } from 'node:path';
-import { boardsOf, KIND_BOARD_LENS, KIND_MSG, KIND_POST_DELETE, KIND_POST_EDIT, KIND_UPVOTE, postsOf, type AppManifest, type BoardLens, type Did, type Json } from '@weave/core';
+import { boardsOf, KIND_BOARD_LENS, KIND_MSG, KIND_POST_DELETE, KIND_POST_EDIT, KIND_UPVOTE, postsOf, type AppManifest, type BoardLens, type Did, type Json, locationCovers, type LensLocation } from '@weave/core';
 import { tagFolder } from './appinstall.ts';
-import type { BoardViewInfo, FeedItem, LensNetInfo } from './backend.ts';
+import type { BoardViewInfo, FeedItem, LensNetInfo, LensLocationInfo } from './backend.ts';
 import { readJson, writeJson } from './home.ts';
 import type { ServicesHost } from './node.ts';
 import { pullImage } from './registry.ts';
@@ -40,6 +40,15 @@ interface StoredNet {
   app: string;
   name: string;
   hosts: string[];
+  at: string;
+}
+
+/** A member's yes to a lens's site knowing where they are, kept on their node (lens-location.json), never shared. */
+interface StoredLocation {
+  project: string;
+  app: string;
+  name: string;
+  location: LensLocation;
   at: string;
 }
 
@@ -285,6 +294,40 @@ export class Lenses {
     return this.#net(lens);
   }
 
+  // ---------------------------------------------------------------- where its member is, as they allowed
+
+  get #locationFile(): string {
+    return joinPath(this.h.home.dir, 'lens-location.json');
+  }
+
+  #locationAllowed(): StoredLocation[] {
+    return readJson<{ allowed?: StoredLocation[] }>(this.#locationFile)?.allowed ?? [];
+  }
+
+  /**
+   * How closely a lens's site asks to know where its member is, and whether they said yes: for this app of this
+   * project, at least that closely. A new version asking the same (or rougher) keeps it; asking for exact after a yes
+   * to rough asks again.
+   */
+  #location(lens: BoardLens): LensLocationInfo | undefined {
+    const asks = lens.manifest.client?.location;
+    if (!asks) return undefined;
+    const said = this.#locationAllowed().find((a) => a.project === lens.origin.project && a.app === lens.manifest.app);
+    return { asks, allowed: locationCovers(said?.location, asks) };
+  }
+
+  /** Let a lens's site know where its member is, as closely as it asks (or, `off`, no longer): on this node only. */
+  async allowLensLocation(input: { release: string; off?: boolean }): Promise<LensLocationInfo> {
+    const lens = this.#pinned(input.release);
+    if (!lens) throw new Error('no board here is shown by that client service');
+    const asks = lens.manifest.client?.location;
+    if (!input.off && !asks) throw new Error(`${lens.name} doesn't ask where you are: there's nothing to allow`);
+    const others = this.#locationAllowed().filter((a) => !(a.project === lens.origin.project && a.app === lens.manifest.app));
+    const mine: StoredLocation[] = input.off || !asks ? [] : [{ project: lens.origin.project, app: lens.manifest.app, name: lens.name, location: asks, at: new Date(this.h.clock()).toISOString() }];
+    writeJson(this.#locationFile, { allowed: [...others, ...mine] });
+    return this.#location(lens) ?? { asks: 'rough', allowed: false };
+  }
+
   /** Fetch a lens's package (once per release), transpile its component, and run it: ready to fold and act. */
   #prepare(lens: BoardLens): Promise<Ready> {
     const client = lens.manifest.client!;
@@ -365,7 +408,8 @@ export class Lenses {
     const base: BoardViewInfo = { space: { id: space.id, kind: space.kind, name: this.h.spaceName(space) }, board: { name: board.name, title: board.title } };
     if (!lens) return base;
     const net = this.#net(lens);
-    const about = { name: lens.name, tag: lens.tag, mode: lens.mode, release: lens.origin.release, by: this.h.actor(lens.by, lens.by), ...(net.hosts.length ? { net } : {}) };
+    const location = this.#location(lens);
+    const about = { name: lens.name, tag: lens.tag, mode: lens.mode, release: lens.origin.release, by: this.h.actor(lens.by, lens.by), ...(net.hosts.length ? { net } : {}), ...(location ? { location } : {}) };
     if (lens.mode === 'suggest' && !input.use) return { ...base, lens: about };
     let ready: Ready;
     try {

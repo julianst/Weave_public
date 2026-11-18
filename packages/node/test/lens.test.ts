@@ -44,12 +44,17 @@ beforeAll(async () => {
   if (spawnSync(tar, ['-czf', out, '-C', dir, '.']).status !== 0) throw new Error('tar failed');
   // The same, asking for a network for its site ("net"): one host, then one more.
   const withNet = (net: string[]) => JSON.stringify({ ...manifest, client: { ...(manifest.client as object), net } });
+  const withLocation = (location: string) => JSON.stringify({ ...manifest, client: { ...(manifest.client as object), location } });
   fetchImpl = registry({ 'kanban:1.0': { labels: { [SERVICE_LABEL]: JSON.stringify(manifest) }, wasm: readFileSync(out) } });
   netImages = registry({
     'kanban:1.0': { labels: { [SERVICE_LABEL]: JSON.stringify(manifest) }, wasm: readFileSync(out) },
     'kanban:2.0': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com']) }, wasm: readFileSync(out) },
     'kanban:2.1': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com']) }, wasm: readFileSync(out) },
     'kanban:3.0': { labels: { [SERVICE_LABEL]: withNet(['api.open-meteo.com', '*.tile.openstreetmap.org']) }, wasm: readFileSync(out) },
+    // Asking where its member is: roughly, roughly again, then exactly.
+    'kanban:4.0': { labels: { [SERVICE_LABEL]: withLocation('rough') }, wasm: readFileSync(out) },
+    'kanban:4.1': { labels: { [SERVICE_LABEL]: withLocation('rough') }, wasm: readFileSync(out) },
+    'kanban:5.0': { labels: { [SERVICE_LABEL]: withLocation('exact') }, wasm: readFileSync(out) },
   });
 }, 180_000);
 
@@ -200,6 +205,37 @@ describe('client services', { timeout: 120_000 }, () => {
     lens = await pin('1.0');
     expect(lens).not.toHaveProperty('net');
     await expect(ola.allowLensNet({ release: lens.release })).rejects.toThrow(/nothing to allow/);
+  });
+
+  it('lets a site know where its member is only once they allowed it, as closely as it asks', async () => {
+    const martl = person('martl');
+    const ola = person('Ola');
+    for (const node of [martl, ola]) node.containerSetup = { ...node.containerSetup, fetch: netImages };
+    await martl.createProject({ name: 'Walks' });
+    await martl.setBoard({ project: 'Walks', name: 'finds', title: 'Finds' });
+    await ola.joinSpace(await martl.invite('Walks'));
+    const pin = async (tag: string) => {
+      await martl.releaseService({ project: 'Walks', image: `ghcr.io/martl/kanban:${tag}` });
+      await martl.setBoardLens({ space: 'Walks', board: 'finds', from: { project: 'Walks', tag }, mode: 'require' });
+      sync([martl, ola]);
+      return (await ola.boardView({ space: 'Walks', board: 'finds' })).lens!;
+    };
+
+    let lens = await pin('4.0');
+    expect(lens.location).toEqual({ asks: 'rough', allowed: false });
+    expect(await ola.allowLensLocation({ release: lens.release })).toEqual({ asks: 'rough', allowed: true });
+    expect((await martl.boardView({ space: 'Walks', board: 'finds' })).lens!.location!.allowed).toBe(false);
+    // The same wish in a new version keeps the yes; asking for exact asks again.
+    lens = await pin('4.1');
+    expect(lens.location!.allowed).toBe(true);
+    lens = await pin('5.0');
+    expect(lens.location).toEqual({ asks: 'exact', allowed: false });
+    await ola.allowLensLocation({ release: lens.release });
+    expect((await ola.allowLensLocation({ release: lens.release, off: true })).allowed).toBe(false);
+    // A lens that doesn't ask has nothing to allow.
+    lens = await pin('1.0');
+    expect(lens).not.toHaveProperty('location');
+    await expect(ola.allowLensLocation({ release: lens.release })).rejects.toThrow(/nothing to allow/);
   });
 
   it('refuses a release that isn’t a client service', async () => {

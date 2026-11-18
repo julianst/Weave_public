@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { roughLocation, type LensLocation } from '@weave/core';
 import type { BoardInfo, BoardViewInfo, SpaceInfo } from '@weave/node/client';
 import { Icon } from './icons.tsx';
 import { api, bridge, bump, useApi } from './lib.ts';
@@ -16,6 +17,10 @@ import { useTexts } from './texts.tsx';
  *   from the frame  {weave: 'files', net} / {weave: 'loaded'}       Weave Web's frame: the view's files, please / built
  *                                                                  (net: the hosts in its own address, which its CSP took)
  *   to the frame    {weave: 'files', files: [{path, type, data}]}  (apps/web/src/lens-frame.html)
+ *   from the frame  {weave: 'locate', id}                           where am I? (only if its member allowed it)
+ *   to the frame    {weave: 'location', id, lat, lon, accuracy, rough} / {weave: 'location', id, error}
+ *                                                                  Weave asks the device, never the frame; rough is
+ *                                                                  the middle of a 0.01° cell (roughLocation)
  *
  * A chat's widget (widgets.tsx) talks the same way: its 'view' carries {widget: {id, title}} instead of board.
  *
@@ -52,15 +57,34 @@ export function useLensChoice(space: SpaceInfo, board?: BoardInfo): [boolean, (o
  * `view` says whenever that changes, asks for actions (`act`, signed by you with your rights) and to open posts.
  * Only its own frame is listened to, nothing else on the page.
  */
-export function LensFrame({ title, release, base, net, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
+/**
+ * Where this device is, asked of it once at a time (the browser's or Electron's geolocation), as closely as a view
+ * may know it: rough (roughLocation) or exact. The frame never gets geolocation itself (its sandbox has none).
+ */
+function locate(level: LensLocation): Promise<{ lat: number; lon: number; accuracy: number; rough: boolean }> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('this device has no location'));
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        const { latitude: lat, longitude: lon, accuracy } = p.coords;
+        if (level === 'exact') resolve({ lat, lon, accuracy: Math.round(accuracy), rough: false });
+        else resolve({ ...roughLocation(lat, lon), accuracy: Math.max(1000, Math.round(accuracy)), rough: true });
+      },
+      (e) => reject(new Error(e.message || 'no location')),
+      { enableHighAccuracy: level === 'exact', timeout: 15000, maximumAge: 60000 },
+    );
+  });
+}
+
+export function LensFrame({ title, release, base, net, location, onLocated, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; location?: LensLocation; onLocated?(): void; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
   const { t } = useTexts();
   const frame = useRef<HTMLIFrameElement>(null);
   // Weave Web's frame takes its CSP from its address (a Pages Function): the hosts this member allowed, or none. On a
   // computer or a phone the node's answer carries them (lensFile), so the address stays as it is.
   const hosts = net?.length ? net.join(',') : '';
   const src = bridge.web && hosts ? `${base}?net=${encodeURIComponent(hosts)}` : base;
-  const latest = useRef({ view, act, onOpen, release, hosts, title, t });
-  latest.current = { view, act, onOpen, release, hosts, title, t };
+  const latest = useRef({ view, act, onOpen, release, hosts, title, t, location, onLocated });
+  latest.current = { view, act, onOpen, release, hosts, title, t, location, onLocated };
   const send = (message: unknown) => frame.current?.contentWindow?.postMessage(message, '*');
   const sendView = () => send(latest.current.view);
   useEffect(sendView, [view]);
@@ -82,6 +106,19 @@ export function LensFrame({ title, release, base, net, view, act, onOpen, classN
         );
       }
       if (m?.weave === 'open' && typeof m.post === 'string') latest.current.onOpen?.(m.post);
+      // Where its member is: only as its member allowed (location), asked of the device here, never in the frame.
+      if (m?.weave === 'locate') {
+        const level = latest.current.location;
+        if (!level) send({ weave: 'location', id: m.id, error: latest.current.t('lens.location.not.allowed', { name: latest.current.title }) });
+        else
+          locate(level).then(
+            (where) => {
+              send({ weave: 'location', id: m.id, ...where });
+              latest.current.onLocated?.();
+            },
+            (e: Error) => send({ weave: 'location', id: m.id, error: e.message }),
+          );
+      }
       // Weave Web's frame (apps/web/src/lens-frame.html) asks for the view's files, builds its page, and says so.
       // Only to the frame this page made, with the hosts it was given: a view that sent its frame elsewhere (another
       // address, other hosts) gets nothing of it.
@@ -129,6 +166,11 @@ export function LensView({ space, board, meDid, onOpen }: { space: SpaceInfo; bo
     await api('allowLensNet', { release: view.lens!.release, ...(on ? {} : { off: true }) }).catch((e: Error) => toast(e.message, 'error'));
     reload();
   };
+  const where = view.lens.location;
+  const allowWhere = async (on: boolean) => {
+    await api('allowLensLocation', { release: view.lens!.release, ...(on ? {} : { off: true }) }).catch((e: Error) => toast(e.message, 'error'));
+    reload();
+  };
   return (
     <>
       {net && !net.allowed && (
@@ -148,8 +190,25 @@ export function LensView({ space, board, meDid, onOpen }: { space: SpaceInfo; bo
           <button className="link" onClick={() => void allow(false)}>{t('lens.net.off')}</button>
         </div>
       )}
+      {where && !where.allowed && (
+        <div className="lens-net ask">
+          <span>
+            <Icon name="mapPin" /> {t(where.asks === 'exact' ? 'lens.location.ask.exact' : 'lens.location.ask', { name: view.lens.name })}
+          </span>
+          <span className="muted">{t('lens.location.why')}</span>
+          <button onClick={() => void allowWhere(true)}>{t('lens.net.allow')}</button>
+        </div>
+      )}
+      {where?.allowed && (
+        <div className="lens-net">
+          <span className="muted">
+            <Icon name="mapPin" /> {t(where.asks === 'exact' ? 'lens.location.on.exact' : 'lens.location.on', { name: view.lens.name })}
+          </span>
+          <button className="link" onClick={() => void allowWhere(false)}>{t('lens.net.off')}</button>
+        </div>
+      )}
       {/* A new key when the hosts change: the frame loads again with the CSP that goes with them. */}
-      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
+      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} location={where?.allowed ? where.asks : undefined} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
     </>
   );
 }

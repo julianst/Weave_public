@@ -153,6 +153,28 @@ export interface AppClient {
    * component never gets a network: it folds the same for everyone.
    */
   net?: string[];
+  /** Its site may ask where its member is (LensLocation), once they said yes: about 1 km ("rough") or as exact as the device knows. */
+  location?: LensLocation;
+}
+
+/**
+ * How closely a lens's or widget's site may know where its member is: "rough" (a cell of about 1 km, roughLocation)
+ * or "exact" (what the device says). Weave asks the device, never the sandboxed frame, and only once its member said
+ * yes; the component never gets it.
+ */
+export type LensLocation = 'rough' | 'exact';
+
+/** "exact" covers "rough"; "rough" covers only "rough". */
+export const locationCovers = (allowed: LensLocation | undefined, asked: LensLocation | undefined): boolean => !!allowed && !!asked && (allowed === 'exact' || asked === 'rough');
+
+/**
+ * A place made rough for a site that may know it only roughly: the middle of its cell in a fixed grid of 0.01°
+ * (about 1.1 km north to south, less east to west), so asking again from nearby gives the same answer and many asks
+ * don't narrow it down.
+ */
+export function roughLocation(lat: number, lon: number): { lat: number; lon: number } {
+  const cell = (v: number) => Math.round((Math.floor(v * 100) + 0.5) * 1000) / 100000;
+  return { lat: cell(lat), lon: cell(lon) };
 }
 
 /** The height a widget asks for in a chat, in CSS pixels: between these, and this one when it says none. */
@@ -169,6 +191,8 @@ export interface AppWidget {
   size?: { height: number };
   /** Hosts its site may load from over HTTPS, as a client service's (AppClient.net). */
   net?: string[];
+  /** Its site may ask where its member is, as a client service's (AppClient.location): approving its release allows it. */
+  location?: LensLocation;
 }
 
 /** Where a WebAssembly service's parts are in its package: paths inside it, like "service.wasm" and "site". */
@@ -774,6 +798,13 @@ export function checkManifest(input: unknown): ManifestCheck {
     const unique = [...new Set(hosts as string[])].slice(0, 20);
     return unique.length ? unique : undefined;
   };
+  /** A site's wish to know where its member is ("client.location", "widget.location"): "rough" or "exact". */
+  const siteLocation = (raw: Record<string, unknown>, field: string): LensLocation | undefined | null => {
+    if (raw.location === undefined) return undefined;
+    if (raw.location === 'rough' || raw.location === 'exact') return raw.location;
+    problems.push(`"${field}.location" says how closely its site may know where its member is: "rough" (about 1 km) or "exact" (not ${JSON.stringify(raw.location)})`);
+    return null;
+  };
   // A client service: where its component and site are, and what its actions may write (the kinds members sign).
   let client: AppClient | undefined;
   if (m.client !== undefined) {
@@ -785,8 +816,10 @@ export function checkManifest(input: unknown): ManifestCheck {
     else if (raw.site !== undefined && !site) problems.push('"client.site" is the folder of its renderer in the package, like "site"');
     else {
       const net = siteNet(raw, 'client');
+      const location = siteLocation(raw, 'client');
       if (net && !site) problems.push('"client.net" is for its site: a client service without one ("client.site") loads nothing');
-      else client = { component, ...(site ? { site } : {}), writes, ...(net ? { net } : {}) };
+      else if (location && !site) problems.push('"client.location" is for its site: a client service without one ("client.site") shows nothing');
+      else if (location !== null) client = { component, ...(site ? { site } : {}), writes, ...(net ? { net } : {}), ...(location ? { location } : {}) };
     }
   }
   // A group widget: as a client service, but its kinds are its own only (never Weave's), and it says its height.
@@ -806,8 +839,10 @@ export function checkManifest(input: unknown): ManifestCheck {
     else {
       if (named.length !== writes.length) warnings.push('"widget.writes" lists kinds like "tiles.move": the others are left out');
       const net = siteNet(raw, 'widget');
+      const location = siteLocation(raw, 'widget');
       if (net && !site) problems.push('"widget.net" is for its site: a widget without one ("widget.site") loads nothing');
-      else widget = { component, ...(site ? { site } : {}), writes, ...(raw.size !== undefined ? { size: { height: Math.round(Math.min(WIDGET_HEIGHT.max, Math.max(WIDGET_HEIGHT.min, height))) } } : {}), ...(net ? { net } : {}) };
+      else if (location && !site) problems.push('"widget.location" is for its site: a widget without one ("widget.site") shows nothing');
+      else if (location !== null) widget = { component, ...(site ? { site } : {}), writes, ...(raw.size !== undefined ? { size: { height: Math.round(Math.min(WIDGET_HEIGHT.max, Math.max(WIDGET_HEIGHT.min, height))) } } : {}), ...(net ? { net } : {}), ...(location ? { location } : {}) };
     }
   }
   // A mark service: where its component is, what it reads, and where it answers.
