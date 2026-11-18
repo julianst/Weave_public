@@ -74,9 +74,43 @@ export interface PureComponent {
  * Fetch a pure component's release (once), transpile its component, and run it with nothing to call: ready to fold
  * and act. `ready` keeps what is being made ready, by key, so it happens once.
  */
+/**
+ * Pure components running here, by key: when each was last used, and how to let it go. Each one is a JavaScript
+ * engine of its own (often 10 MB of code and much more in memory), so they don't all stay: one unused for a while
+ * stops, and beyond a few the one used longest ago stops (each starts again when it's next asked for).
+ */
+const PURE_RUNNING = new Map<string, { at: number; stop(): void }>();
+const PURE_IDLE = 10 * 60_000;
+const PURE_KEPT = 4;
+let pureSweep: ReturnType<typeof setInterval> | undefined;
+
+function usePure(key: string, stop: () => void): void {
+  PURE_RUNNING.delete(key);
+  PURE_RUNNING.set(key, { at: Date.now(), stop });
+  while (PURE_RUNNING.size > PURE_KEPT) {
+    const [oldest, run] = PURE_RUNNING.entries().next().value!;
+    PURE_RUNNING.delete(oldest);
+    run.stop();
+  }
+  pureSweep ??= setInterval(() => {
+    for (const [k, run] of PURE_RUNNING) {
+      if (Date.now() - run.at < PURE_IDLE) continue;
+      PURE_RUNNING.delete(k);
+      run.stop();
+    }
+  }, 60_000);
+  (pureSweep as { unref?: () => void }).unref?.();
+}
+
 export function preparePure(h: ServicesHost, ready: Map<string, Promise<Ready>>, c: PureComponent): Promise<Ready> {
   const before = ready.get(c.key);
-  if (before && h.runtime.running(c.key)) return before;
+  if (before && h.runtime.running(c.key)) {
+    usePure(c.key, () => {
+      ready.delete(c.key);
+      h.runtime.stop(c.key);
+    });
+    return before;
+  }
   const making = (async (): Promise<Ready> => {
     const root = await releaseFolder(h, c.dir, { origin: c.origin, tag: c.tag, manifest: c.manifest });
     if (!existsSync(joinPath(root, c.part.component))) throw new Error(`${c.name} ${c.tag} has no ${c.part.component}`);
@@ -99,7 +133,14 @@ export function preparePure(h: ServicesHost, ready: Map<string, Promise<Ready>>,
     return { key: c.key, ...(c.part.site ? { site: joinPath(root, c.part.site) } : {}) };
   })();
   ready.set(c.key, making);
-  making.catch(() => ready.delete(c.key));
+  making.then(
+    () =>
+      usePure(c.key, () => {
+        ready.delete(c.key);
+        h.runtime.stop(c.key);
+      }),
+    () => ready.delete(c.key),
+  );
   return making;
 }
 
