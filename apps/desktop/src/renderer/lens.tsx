@@ -17,6 +17,7 @@ import { useTexts } from './texts.tsx';
  *   from the frame  {weave: 'files', net} / {weave: 'loaded'}       Weave Web's frame: the view's files, please / built
  *                                                                  (net: the hosts in its own address, which its CSP took)
  *   to the frame    {weave: 'files', files: [{path, type, data}]}  (apps/web/src/lens-frame.html)
+ *   from the frame  {weave: 'fullscreen', on?}                      fill the screen with the view (on: false, leave it)
  *   from the frame  {weave: 'locate', id}                           where am I? (only if its member allowed it)
  *   to the frame    {weave: 'location', id, lat, lon, accuracy, rough} / {weave: 'location', id, error}
  *                                                                  Weave asks the device, never the frame; rough is
@@ -76,15 +77,15 @@ function locate(level: LensLocation): Promise<{ lat: number; lon: number; accura
   });
 }
 
-export function LensFrame({ title, release, base, net, location, onLocated, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; location?: LensLocation; onLocated?(): void; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
+export function LensFrame({ title, release, base, net, location, onLocated, onFullscreen, view, act, onOpen, className, style }: { title: string; release: string; base: string; net?: string[]; location?: LensLocation; onLocated?(): void; onFullscreen?(on: boolean): void; view: unknown; act(name: string, input: unknown): Promise<unknown>; onOpen?(post: string): void; className?: string; style?: CSSProperties }) {
   const { t } = useTexts();
   const frame = useRef<HTMLIFrameElement>(null);
   // Weave Web's frame takes its CSP from its address (a Pages Function): the hosts this member allowed, or none. On a
   // computer or a phone the node's answer carries them (lensFile), so the address stays as it is.
   const hosts = net?.length ? net.join(',') : '';
   const src = bridge.web && hosts ? `${base}?net=${encodeURIComponent(hosts)}` : base;
-  const latest = useRef({ view, act, onOpen, release, hosts, title, t, location, onLocated });
-  latest.current = { view, act, onOpen, release, hosts, title, t, location, onLocated };
+  const latest = useRef({ view, act, onOpen, release, hosts, title, t, location, onLocated, onFullscreen });
+  latest.current = { view, act, onOpen, release, hosts, title, t, location, onLocated, onFullscreen };
   const send = (message: unknown) => frame.current?.contentWindow?.postMessage(message, '*');
   const sendView = () => send(latest.current.view);
   useEffect(sendView, [view]);
@@ -106,6 +107,8 @@ export function LensFrame({ title, release, base, net, location, onLocated, view
         );
       }
       if (m?.weave === 'open' && typeof m.post === 'string') latest.current.onOpen?.(m.post);
+      // The view asks to fill the screen (a map, a game): a click in it came first, so the browser lets the page do it.
+      if (m?.weave === 'fullscreen') latest.current.onFullscreen?.((m as { on?: unknown }).on !== false);
       // Where its member is: only as its member allowed (location), asked of the device here, never in the frame.
       if (m?.weave === 'locate') {
         const level = latest.current.location;
@@ -143,8 +146,52 @@ export function LensFrame({ title, release, base, net, location, onLocated, view
   return <iframe ref={frame} className={className ?? 'lens-frame'} style={style} title={title} src={src} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={sendView} />;
 }
 
-export function LensView({ space, board, meDid, onOpen }: { space: SpaceInfo; board: BoardInfo; meDid: string; onOpen(post: string): void }) {
+/**
+ * A lens's view filling the screen: the browser's full screen where it has one for a page's element (a computer, an
+ * Android phone), otherwise (an iPhone) the box laid over the whole app. Esc, or the button at the top, leaves it.
+ */
+function useFullscreen(box: { current: HTMLElement | null }, full: boolean, setFull: (on: boolean) => void) {
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const native = typeof el.requestFullscreen === 'function' && document.fullscreenEnabled;
+    if (full && native && document.fullscreenElement !== el) el.requestFullscreen().catch(() => el.classList.add('lens-full'));
+    else if (full && !native) el.classList.add('lens-full');
+    if (!full) {
+      el.classList.remove('lens-full');
+      if (document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
+    }
+  }, [full]);
+  useEffect(() => {
+    const changed = () => {
+      if (!document.fullscreenElement && !box.current?.classList.contains('lens-full')) setFull(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && box.current?.classList.contains('lens-full')) setFull(false);
+    };
+    document.addEventListener('fullscreenchange', changed);
+    window.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('fullscreenchange', changed);
+      window.removeEventListener('keydown', key);
+    };
+  }, []);
+}
+
+/** The pane's button for it, next to the lens switch. */
+export function LensFullscreenButton({ full, setFull }: { full: boolean; setFull(on: boolean): void }) {
   const { t } = useTexts();
+  return (
+    <button onClick={() => setFull(!full)} title={t(full ? 'lens.fullscreen.exit' : 'lens.fullscreen')}>
+      <span aria-hidden="true">⤢</span> {t('lens.fullscreen.short')}
+    </button>
+  );
+}
+
+export function LensView({ space, board, meDid, onOpen, full = false, setFull = () => {} }: { space: SpaceInfo; board: BoardInfo; meDid: string; onOpen(post: string): void; full?: boolean; setFull?(on: boolean): void }) {
+  const { t } = useTexts();
+  const box = useRef<HTMLDivElement>(null);
+  useFullscreen(box, full, setFull);
   const { data: view, error, reload } = useApi(() => api<BoardViewInfo>('boardView', { space: space.id, board: board.name, use: true }), [space.id, board.name, board.lens?.release]);
   // Where its view is served here: the desktop, the phone and the web preview each serve it their own way.
   const { data: base } = useApi(async () => (view?.lens?.site ? bridge.lensBase(view.lens.release) : undefined), [view?.lens?.release, view?.lens?.site]);
@@ -172,7 +219,12 @@ export function LensView({ space, board, meDid, onOpen }: { space: SpaceInfo; bo
     reload();
   };
   return (
-    <>
+    <div className="lens-box" ref={box}>
+      {full && (
+        <button className="lens-full-exit" onClick={() => setFull(false)}>
+          {t('lens.fullscreen.exit')}
+        </button>
+      )}
       {net && !net.allowed && (
         <div className="lens-net ask">
           <span>
@@ -208,8 +260,8 @@ export function LensView({ space, board, meDid, onOpen }: { space: SpaceInfo; bo
         </div>
       )}
       {/* A new key when the hosts change: the frame loads again with the CSP that goes with them. */}
-      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} location={where?.allowed ? where.asks : undefined} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
-    </>
+      <LensFrame key={net?.allowed ? 'net' : 'none'} title={view.lens.name} release={view.lens.release} base={base} net={net?.allowed ? net.hosts : undefined} location={where?.allowed ? where.asks : undefined} onFullscreen={setFull} view={message} act={(name, input) => api('boardAction', { space: space.id, board: board.name, action: name, input })} onOpen={onOpen} />
+    </div>
   );
 }
 

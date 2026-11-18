@@ -1134,3 +1134,10 @@ button.session-title:hover { text-decoration: underline; }
   .board-strip::-webkit-scrollbar { display: none; }
   .board-chip { flex: none; white-space: nowrap; scroll-snap-align: start; }
 }
+
+/* A lens's view, and the same filling the screen: the browser's full screen, or laid over the app (an iPhone). */
+.lens-box { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--window, #fff); }
+.lens-box:fullscreen { width: 100vw; height: 100vh; }
+.lens-box.lens-full { position: fixed; inset: 0; z-index: 10000; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.lens-full-exit { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 2; padding: 4px 12px; border-radius: 999px; font-size: 12px; opacity: 0.55; transition: opacity 0.2s; }
+.lens-full-exit:hover, .lens-full-exit:focus-visible { opacity: 1; }
