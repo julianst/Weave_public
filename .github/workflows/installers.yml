@@ -118,7 +118,9 @@ jobs:
   store:
     name: microsoft-store
     if: ${{ inputs.store || (inputs.release && vars.STORE_IDENTITY) }}
-    runs-on: ${{ fromJSON(vars.WINDOWS_RUNNER || '["self-hosted","windows-vm"]') }}
+    # GitHub's runner, not the self-hosted one: the package (about 250 MB) goes up to the Store's Azure storage, which
+    # the self-hosted runner's upload didn't manage (about 100 KB/s, given up). STORE_RUNNER (JSON) picks another.
+    runs-on: ${{ fromJSON(vars.STORE_RUNNER || '"windows-latest"') }}
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
