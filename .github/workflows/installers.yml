@@ -22,7 +22,7 @@ on:
         type: string
         required: false
       store:
-        description: Build only the Microsoft Store package (.appx), kept as a workflow artifact
+        description: Build only the Microsoft Store package (.appx), kept as a workflow artifact; with a release tag, also submitted to the Store
         type: boolean
         default: false
       store_identity:
@@ -159,4 +159,6 @@ jobs:
           if (-not $env:CLIENT_SECRET -or -not $env:PRODUCT) { Write-Host "Partner Center isn't set up for this repository: the package stays a workflow artifact"; exit 0 }
           msstore reconfigure --tenantId $env:TENANT --sellerId $env:SELLER --clientId $env:CLIENT --clientSecret $env:CLIENT_SECRET
           $package = Get-ChildItem apps/desktop/release/*.appx | Select-Object -First 1
-          msstore publish $package.FullName -id $env:PRODUCT
+          # The path is the project (msstore finds its publisher there: Electron, from apps/desktop/package.json), the
+          # package is given on its own: a path to the .appx itself finds no publisher.
+          msstore publish apps/desktop -i $package.FullName -id $env:PRODUCT
